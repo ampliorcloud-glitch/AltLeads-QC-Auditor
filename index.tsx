@@ -55,7 +55,27 @@ const QUALITY_CRITERIA = [
 ];
 
 const App: React.FC = () => {
-  const [audits, setAudits] = useState<CallAudit[]>([]);
+  const [audits, setAudits] = useState<CallAudit[]>(() => {
+    const saved = localStorage.getItem('callAudits');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        // Clear blob URLs as they won't work across sessions
+        return parsed.map((a: CallAudit) => ({
+          ...a,
+          audioUrl: a.audioUrl?.startsWith('blob:') ? undefined : a.audioUrl
+        }));
+      } catch (e) {
+        console.error('Failed to parse cached audits', e);
+      }
+    }
+    return [];
+  });
+
+  useEffect(() => {
+    localStorage.setItem('callAudits', JSON.stringify(audits));
+  }, [audits]);
+
   const [selectedAuditId, setSelectedAuditId] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
@@ -92,9 +112,9 @@ const App: React.FC = () => {
         }
       }
 
-      // Using gemini-3-pro-preview for complex reasoning and transcription tasks.
+      // Using gemini-3-flash-preview for generous free tier limits and fast audio processing.
       const response = await ai.models.generateContent({
-        model: 'gemini-3-pro-preview',
+        model: 'gemini-3-flash-preview',
         contents: {
           parts: [
             {
@@ -320,7 +340,7 @@ const App: React.FC = () => {
         
         <div className="p-4 bg-slate-950/50 text-xs border-t border-slate-800">
           <div className="flex justify-between items-center text-slate-500">
-            <span>Powered by Gemini 3 Pro</span>
+            <span>Powered by Gemini 3 Flash</span>
             <div className="flex gap-2">
               <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
               Live
@@ -367,7 +387,13 @@ const App: React.FC = () => {
                   ) : selectedAudit.status === 'completed' ? (
                     <>
                       <div className="sticky top-0 bg-white/95 backdrop-blur py-4 border-b mb-8 z-10 flex items-center gap-4">
-                        <audio src={selectedAudit.audioUrl} controls className="flex-1 h-10" />
+                        {selectedAudit.audioUrl ? (
+                          <audio src={selectedAudit.audioUrl} controls className="flex-1 h-10" />
+                        ) : (
+                          <div className="flex-1 h-10 flex items-center text-sm text-slate-500 italic px-4 bg-slate-50 rounded-lg border border-slate-200">
+                            Audio recording unavailable for cached sessions.
+                          </div>
+                        )}
                       </div>
                       <div className="space-y-6">
                         {selectedAudit.transcript?.map((line, i) => (
