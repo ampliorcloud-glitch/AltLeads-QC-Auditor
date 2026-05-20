@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
 import { auth } from '../lib/firebase';
@@ -11,12 +11,25 @@ import {
   BarChart3, 
   Settings,
   LogOut,
-  ShieldCheck
+  ShieldCheck,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
 
 export default function AppLayout() {
   const { user, userRole, setUser, setUserRole } = useAuthStore();
   const location = useLocation();
+
+  const [isCollapsed, setIsCollapsed] = useState(() => {
+    return localStorage.getItem('sidebar_collapsed') === 'true';
+  });
+
+  const toggleSidebar = () => {
+    setIsCollapsed(prev => {
+      localStorage.setItem('sidebar_collapsed', String(!prev));
+      return !prev;
+    });
+  };
 
   const handleLogout = async () => {
     await signOut(auth);
@@ -37,16 +50,33 @@ export default function AppLayout() {
   return (
     <div className="flex h-screen bg-[#F1F3F5] text-[#111827] font-sans">
       {/* Sidebar */}
-      <div className="w-64 bg-white shadow-[4px_0_24px_rgba(0,0,0,0.02)] flex flex-col z-10">
-        <div className="h-20 flex items-center px-8">
-          <div className="w-8 h-8 bg-black rounded-lg flex items-center justify-center mr-3">
-            <ShieldCheck className="w-5 h-5 text-white" />
+      <div className={`${isCollapsed ? 'w-20' : 'w-64'} bg-white shadow-[4px_0_24px_rgba(0,0,0,0.02)] flex flex-col z-10 transition-all duration-300 relative border-r border-[#E5E7EB]`}>
+        {/* Sidebar Header & Toggle */}
+        <div className="h-20 flex items-center px-6 justify-between border-b border-[#F1F3F5]">
+          <div className="flex items-center overflow-hidden">
+            <div className="w-8 h-8 bg-black rounded-lg flex items-center justify-center flex-shrink-0 shadow-sm">
+              <ShieldCheck className="w-5 h-5 text-white" />
+            </div>
+            {!isCollapsed && (
+              <span className="font-display font-bold text-xl tracking-tight ml-3 text-black">
+                AltLeads
+              </span>
+            )}
           </div>
-          <span className="font-display font-bold text-xl tracking-tight">AltLeads</span>
+          
+          <button 
+            type="button"
+            onClick={toggleSidebar} 
+            className={`p-1.5 hover:bg-[#F1F3F5] rounded-xl text-[#6B7280] hover:text-black transition-all ${isCollapsed ? 'mx-auto mt-1' : ''}`}
+            title={isCollapsed ? "Expand Sidebar" : "Collapse Sidebar"}
+          >
+            {isCollapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
+          </button>
         </div>
         
+        {/* Navigation items */}
         <nav className="flex-1 overflow-y-auto py-6">
-          <ul className="space-y-2 px-4">
+          <ul className="space-y-2 px-3">
             {navigation.map((item) => {
               if (item.adminOnly && userRole !== 'Admin') return null;
               
@@ -55,14 +85,21 @@ export default function AppLayout() {
                 <li key={item.name}>
                   <Link
                     to={item.href}
-                    className={`flex items-center px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
+                    className={`flex items-center py-3 rounded-xl text-sm font-semibold transition-all duration-200 ${
+                      isCollapsed ? 'justify-center px-0' : 'px-4'
+                    } ${
                       isActive 
-                        ? 'bg-black text-white shadow-md' 
+                        ? 'bg-black text-white shadow-[0_4px_14px_0_rgba(0,0,0,0.15)]' 
                         : 'text-[#6B7280] hover:bg-[#F8F9FA] hover:text-black'
                     }`}
+                    title={isCollapsed ? item.name : undefined}
                   >
-                    <item.icon className={`w-5 h-5 mr-3 ${isActive ? 'text-white' : 'text-[#6B7280]'}`} />
-                    {item.name}
+                    <item.icon className={`w-5 h-5 ${isCollapsed ? '' : 'mr-3'} ${isActive ? 'text-white' : 'text-[#6B7280]'}`} />
+                    {!isCollapsed && (
+                      <span className="font-display">
+                        {item.name}
+                      </span>
+                    )}
                   </Link>
                 </li>
               );
@@ -70,23 +107,30 @@ export default function AppLayout() {
           </ul>
         </nav>
 
-        <div className="p-6">
-          <div className="glass-panel rounded-2xl p-4 mb-4">
-            <div className="flex items-center mb-3">
-              <div className="w-10 h-10 rounded-full bg-gradient-to-br from-emerald-400 to-emerald-600 flex items-center justify-center text-white font-display font-bold shadow-sm">
+        {/* User Card & Logout Footer */}
+        <div className={`${isCollapsed ? 'p-2' : 'p-4'} mt-auto border-t border-[#F1F3F5]`}>
+          <div className={`p-3 rounded-2xl bg-[#F8F9FA] border border-[#E5E7EB] flex flex-col ${isCollapsed ? 'items-center gap-3' : 'gap-3'}`}>
+            <div className="flex items-center">
+              <div className="w-9 h-9 rounded-full bg-gradient-to-br from-black to-gray-700 flex items-center justify-center text-white font-display font-bold shadow-sm flex-shrink-0">
                 {user?.displayName?.charAt(0) || 'A'}
               </div>
-              <div className="ml-3 overflow-hidden">
-                <p className="text-sm font-bold font-display truncate text-black">{user?.displayName || 'Admin User'}</p>
-                <p className="text-xs text-[#6B7280] font-medium truncate">{userRole || 'Admin'}</p>
-              </div>
+              {!isCollapsed && (
+                <div className="ml-3 overflow-hidden">
+                  <p className="text-sm font-bold font-display truncate text-black">{user?.displayName || 'Admin User'}</p>
+                  <p className="text-xs text-[#6B7280] font-medium truncate">{userRole || 'Admin'}</p>
+                </div>
+              )}
             </div>
+            
             <button
               onClick={handleLogout}
-              className="flex items-center justify-center w-full px-3 py-2 text-xs font-bold text-black bg-white rounded-lg shadow-sm hover:bg-gray-50 transition-colors"
+              className={`flex items-center justify-center font-bold text-black hover:bg-black/5 rounded-lg transition-all ${
+                isCollapsed ? 'p-2 w-9 h-9 border border-[#E5E7EB] bg-white shadow-sm' : 'w-full px-3 py-2 text-xs border border-[#E5E7EB] bg-white shadow-sm'
+              }`}
+              title="Sign Out"
             >
-              <LogOut className="w-3.5 h-3.5 mr-2" />
-              Sign Out
+              <LogOut className={`w-3.5 h-3.5 ${isCollapsed ? '' : 'mr-2'}`} />
+              {!isCollapsed && "Sign Out"}
             </button>
           </div>
         </div>
@@ -94,12 +138,12 @@ export default function AppLayout() {
 
       {/* Main Content */}
       <div className="flex-1 flex flex-col overflow-hidden relative">
-        <header className="h-20 flex items-center px-10">
+        <header className="h-20 flex items-center px-10 border-b border-[#F1F3F5] bg-white">
           <h1 className="text-2xl font-display font-bold text-black tracking-tight">
             {navigation.find(n => n.href === location.pathname)?.name || 'Dashboard'}
           </h1>
         </header>
-        <main className="flex-1 overflow-y-auto px-10 pb-10">
+        <main className="flex-1 overflow-y-auto px-10 py-10">
           <Outlet />
         </main>
       </div>

@@ -11,6 +11,8 @@ import Dashboard from './pages/Dashboard';
 import Agents from './pages/Agents';
 import Users from './pages/Users';
 import Projects from './pages/Projects';
+import Analytics from './pages/Analytics';
+import Settings from './pages/Settings';
 
 export default function App() {
   const { user, setUser, setUserRole, setLoading, loading } = useAuthStore();
@@ -37,10 +39,12 @@ export default function App() {
         
         <Route path="/" element={user ? <Layout /> : <Navigate to="/login" />}>
           <Route index element={<Dashboard />} />
+          <Route path="upload" element={<Dashboard />} />
           <Route path="agents" element={<Agents />} />
           <Route path="users" element={<Users />} />
           <Route path="projects" element={<Projects />} />
-          {/* Add other routes here as we build them */}
+          <Route path="analytics" element={<Analytics />} />
+          <Route path="settings" element={<Settings />} />
           <Route path="*" element={<Navigate to="/" />} />
         </Route>
       </Routes>
