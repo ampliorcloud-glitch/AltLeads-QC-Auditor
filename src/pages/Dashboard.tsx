@@ -21,6 +21,7 @@ import {
   deleteCallAuditDoc,
   CallAudit
 } from '../lib/firestoreService';
+import { GoogleGenAI, Type } from '@google/genai';
 
 const QUALITY_CRITERIA = [
   { key: 'greeting', label: 'Greeting & Introduction', desc: 'Clarity, brand mention, and rapport.' },
@@ -93,44 +94,87 @@ export default function Dashboard() {
     const saved = localStorage.getItem('callAudits');
     if (saved) {
       try {
-        return JSON.parse(saved);
+        const parsed = JSON.parse(saved);
+        if (parsed && parsed.length > 0) return parsed;
       } catch (e) {
         console.error('Failed to parse cached audits local backup in dashboard', e);
       }
     }
-    return [];
+    return SAMPLE_AUDITS;
   });
   const [selectedAuditId, setSelectedAuditId] = useState<string | null>(() => {
     const saved = localStorage.getItem('callAudits');
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        return parsed[0]?.id || null;
+        return parsed[0]?.id || SAMPLE_AUDITS[0]?.id || null;
       } catch (e) {
         console.error('Failed to parse cached audits for ID', e);
       }
     }
-    return null;
+    return SAMPLE_AUDITS[0]?.id || null;
   });
   const [isDragging, setIsDragging] = useState(false);
   const [localAudios, setLocalAudios] = useState<Record<string, string>>({}); // Temp storage for uploaded audio blobs in current tab session
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const createLocalAndRemoteAudit = async (newAudit: CallAudit) => {
+    setAudits(prev => {
+      const updated = [newAudit, ...prev.filter(a => a.id !== newAudit.id)];
+      localStorage.setItem('callAudits', JSON.stringify(updated));
+      return updated;
+    });
+    try {
+      await createCallAuditDoc(newAudit);
+    } catch (err) {
+      console.warn("Failed to create call audit doc in Firestore:", err);
+    }
+  };
+
+  const updateLocalAndRemoteAudit = async (id: string, updates: Partial<CallAudit>) => {
+    setAudits(prev => {
+      const updated = prev.map(a => a.id === id ? { ...a, ...updates } as CallAudit : a);
+      localStorage.setItem('callAudits', JSON.stringify(updated));
+      return updated;
+    });
+    try {
+      await updateCallAuditDoc(id, updates);
+    } catch (err) {
+      console.warn("Failed to update call audit doc in Firestore:", err);
+    }
+  };
+
+  const deleteLocalAndRemoteAudit = async (id: string) => {
+    setAudits(prev => {
+      const updated = prev.filter(a => a.id !== id);
+      localStorage.setItem('callAudits', JSON.stringify(updated));
+      return updated;
+    });
+    try {
+      await deleteCallAuditDoc(id);
+    } catch (err) {
+      console.warn("Failed to delete call audit doc in Firestore:", err);
+    }
+  };
+
   // Subscribe to real-time audits in Firestore on mount
   useEffect(() => {
     const unsubscribe = subscribeToCallAudits(async (fetchedAudits) => {
-      try {
-        localStorage.setItem('callAudits', JSON.stringify(fetchedAudits));
-      } catch (e) {
-        console.error('Failed to save to local storage cache in dashboard', e);
-      }
-
       if (fetchedAudits.length === 0) {
         // Bootstrap standard demo records on first connect
         for (const sample of SAMPLE_AUDITS) {
-          await createCallAuditDoc(sample);
+          try {
+            await createCallAuditDoc(sample);
+          } catch (e) {
+            console.warn("Could not seed sample audit to Firestore:", e);
+          }
         }
       } else {
+        try {
+          localStorage.setItem('callAudits', JSON.stringify(fetchedAudits));
+        } catch (e) {
+          console.error('Failed to save to local storage cache in dashboard', e);
+        }
         setAudits(fetchedAudits);
         setSelectedAuditId(prev => {
           if (prev && fetchedAudits.some(a => a.id === prev)) return prev;
@@ -138,7 +182,7 @@ export default function Dashboard() {
         });
       }
     }, (error) => {
-      console.error("Firestore subscriber error:", error);
+      console.warn("Firestore subscription failed, running gracefully with local cached data:", error);
     });
     return () => unsubscribe();
   }, []);
@@ -196,30 +240,142 @@ export default function Dashboard() {
         }
       }
 
-      const response = await fetch("/api/gemini/audit", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          data: base64Data,
-          mimeType: mimeType,
-          apiKey: customApiKey,
-          model: selectedModel
-        })
-      });
+      let result;
+      try {
+        const response = await fetch("/api/gemini/audit", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            data: base64Data,
+            mimeType: mimeType,
+            apiKey: customApiKey,
+            model: selectedModel
+          })
+        });
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || `Server returned error status ${response.status}`);
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(errorData.error || `Server returned error status ${response.status}`);
+        }
+
+        result = await response.json();
+      } catch (apiError: any) {
+        console.warn("Backend audit endpoint failed, trying direct browser Gemini evaluation fallback...", apiError);
+        
+        // Find Gemini API Key to use on client side
+        let apiKeyToUse = customApiKey || '';
+        
+        // We use try/catch blocks because process.env properties are replaced 
+        // with String constants at Vite compile-time.
+        if (!apiKeyToUse) {
+          try {
+            const envKey = process.env.GEMINI_API_KEY;
+            if (envKey && envKey !== 'undefined' && envKey.trim()) {
+              apiKeyToUse = envKey.trim();
+            }
+          } catch (e) {}
+        }
+
+        if (!apiKeyToUse) {
+          try {
+            const envKey2 = process.env.API_KEY;
+            if (envKey2 && envKey2 !== 'undefined' && envKey2.trim()) {
+              apiKeyToUse = envKey2.trim();
+            }
+          } catch (e) {}
+        }
+        
+        if (!apiKeyToUse) {
+          try {
+            if (typeof import.meta !== 'undefined' && import.meta.env) {
+              const metaVal = import.meta.env.GEMINI_API_KEY || import.meta.env.VITE_GEMINI_API_KEY;
+              if (metaVal && metaVal !== 'undefined' && metaVal.trim()) {
+                apiKeyToUse = metaVal.trim();
+              }
+            }
+          } catch (e) {}
+        }
+
+        if (!apiKeyToUse) {
+          throw new Error("No Gemini API key found. If you are in a client-only hosting environment, go to Settings (bottom-left gear icon) to save your personal Gemini API key.");
+        }
+
+        const chosenModel = selectedModel || 'gemini-3.5-flash';
+        console.log(`Instructing Gemini directly from browser with model: ${chosenModel}, mimeType: ${mimeType}`);
+
+        const ai = new GoogleGenAI({
+          apiKey: apiKeyToUse,
+        });
+
+        const geminiResponse = await ai.models.generateContent({
+          model: chosenModel,
+          contents: [
+            {
+              inlineData: {
+                mimeType: mimeType,
+                data: base64Data
+              }
+            },
+            {
+              text: `You are an expert sales manager auditing a lead generation call. 
+              1. Transcribe the audio exactly, identifying two speakers: the 'Agent' and the 'Prospect'. Identify their roles based on who is greeting/selling (Agent) and who is responding (Prospect).
+              2. Score the agent's performance from 1 to 10 on: greeting, discovery, valueProp, objectionHandling, and closing.
+              3. Provide an executive summary written from the Agent's (caller's) perspective. It must be a concise narrative detailing: who I connected with, services/trainings discussed, their interest/needs, confirmation of key probing questions asked, stated next steps, and any important information for my senior.
+              4. Provide 3 actionable feedback points for improvement.
+              Return the response in valid JSON format.`
+            }
+          ],
+          config: {
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: Type.OBJECT,
+              properties: {
+                transcript: {
+                  type: Type.ARRAY,
+                  items: {
+                    type: Type.OBJECT,
+                    properties: {
+                      speaker: { type: Type.STRING, enum: ['Agent', 'Prospect'] },
+                      text: { type: Type.STRING }
+                    },
+                    required: ['speaker', 'text']
+                  }
+                },
+                scores: {
+                  type: Type.OBJECT,
+                  properties: {
+                    greeting: { type: Type.NUMBER },
+                    discovery: { type: Type.NUMBER },
+                    valueProp: { type: Type.NUMBER },
+                    objectionHandling: { type: Type.NUMBER },
+                    closing: { type: Type.NUMBER }
+                  },
+                  required: ['greeting', 'discovery', 'valueProp', 'objectionHandling', 'closing']
+                },
+                summary: { type: Type.STRING },
+                feedback: {
+                  type: Type.ARRAY,
+                  items: { type: Type.STRING }
+                }
+              },
+              required: ['transcript', 'scores', 'summary', 'feedback']
+            }
+          }
+        });
+
+        if (!geminiResponse.text) {
+          throw new Error("Direct Gemini API returned an empty response.");
+        }
+
+        result = JSON.parse(geminiResponse.text.trim());
       }
-
-      const result = await response.json();
       
       const sc = result.scores;
       const overall = (sc.greeting + sc.discovery + sc.valueProp + sc.objectionHandling + sc.closing) / 5;
 
-      await updateCallAuditDoc(id, {
+      await updateLocalAndRemoteAudit(id, {
         status: 'completed',
         transcript: result.transcript,
         scores: result.scores,
@@ -230,7 +386,7 @@ export default function Dashboard() {
 
     } catch (error: any) {
       console.error("Audit failed:", error);
-      await updateCallAuditDoc(id, {
+      await updateLocalAndRemoteAudit(id, {
         status: 'error',
         errorMsg: error.message || "An unexpected error occurred during audio file analysis."
       });
@@ -255,16 +411,15 @@ export default function Dashboard() {
         timestamp: Date.now()
       };
 
-      try {
-        await createCallAuditDoc(newAudit);
-        // Transition instantly to processing state
-        await updateCallAuditDoc(id, { status: 'processing' });
-        
-        processCall(id, file);
-        setSelectedAuditId(id);
-      } catch (err) {
-        console.error("Failed to write processing call record to Firestore:", err);
-      }
+      setSelectedAuditId(id);
+
+      // Create locally and remotely
+      await createLocalAndRemoteAudit(newAudit);
+
+      // Transition instantly to processing state
+      await updateLocalAndRemoteAudit(id, { status: 'processing' });
+      
+      processCall(id, file);
     }
   };
 
@@ -297,12 +452,8 @@ export default function Dashboard() {
   };
 
   const removeAudit = async (id: string) => {
-    try {
-      await deleteCallAuditDoc(id);
-      if (selectedAuditId === id) setSelectedAuditId(null);
-    } catch (err) {
-      console.error("Failed to delete audit recording:", err);
-    }
+    await deleteLocalAndRemoteAudit(id);
+    if (selectedAuditId === id) setSelectedAuditId(null);
   };
 
   const getStatusIcon = (status: string) => {
@@ -438,11 +589,20 @@ export default function Dashboard() {
             <div className="flex-1 flex overflow-hidden">
               <div className="flex-1 overflow-y-auto p-8 transcript-container bg-[#F8F9FA] rounded-tl-3xl shadow-[inset_4px_4px_24px_rgba(0,0,0,0.02)]">
                 <div className="max-w-3xl mx-auto space-y-8">
-                  {activeSelectedAudit.status === 'processing' ? (
+                  {activeSelectedAudit.status === 'processing' || activeSelectedAudit.status === 'pending' ? (
                     <div className="flex flex-col items-center justify-center h-64 text-[#6B7280] py-20">
                       <div className="w-12 h-12 border-4 border-[#F1F3F5] border-t-black rounded-full animate-spin mb-4"></div>
                       <p className="font-bold font-display text-lg text-black">Analyzing conversation with Gemini...</p>
-                      <p className="text-sm mt-1">Transcribing and scoring performance using gemini-3.5-flash...</p>
+                      <p className="text-sm mt-1">Transcribing and scoring performance using {(() => {
+                        try {
+                          const saved = localStorage.getItem('auditSettings');
+                          if (saved) {
+                            const parsed = JSON.parse(saved);
+                            if (parsed && parsed.customModel) return parsed.customModel;
+                          }
+                        } catch (e) {}
+                        return 'gemini-3.5-flash';
+                      })()}...</p>
                     </div>
                   ) : activeSelectedAudit.status === 'completed' ? (
                     <>

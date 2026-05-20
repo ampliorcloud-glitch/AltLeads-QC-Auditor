@@ -70,7 +70,7 @@ async function startServer() {
         });
       }
 
-      let chosenModel = clientModel && typeof clientModel === 'string' && clientModel.trim() ? clientModel.trim() : 'gemini-2.5-flash';
+      let chosenModel = clientModel && typeof clientModel === 'string' && clientModel.trim() ? clientModel.trim() : 'gemini-3.5-flash';
       console.log(`Instructing Gemini to analyze call with model: ${chosenModel}, mimeType: ${mimeType}`);
 
       const ai = new GoogleGenAI({
@@ -147,6 +147,11 @@ async function startServer() {
 
     } catch (error: any) {
       console.error("Gemini API call or parsing failed:", error);
+      try {
+        fs.writeFileSync(path.join(process.cwd(), "api_error.log"), `${new Date().toISOString()} - ${error.stack || error.message || error}\n`, "utf8");
+      } catch (err) {
+        console.error("Failed to write to api_error.log", err);
+      }
       return res.status(500).json({ 
         error: error.message || "An unexpected error occurred while analyzing the audio file." 
       });
