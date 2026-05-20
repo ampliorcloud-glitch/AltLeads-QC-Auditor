@@ -1,0 +1,73 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "A system user (Admin, TL, QC Manager, Viewer)",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string", "format": "email" },
+        "displayName": { "type": "string" },
+        "role": { "type": "string", "enum": ["Admin", "TL", "QC_Manager", "Viewer"] },
+        "status": { "type": "string", "enum": ["Active", "Inactive"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "lastLogin": { "type": "string", "format": "date-time" }
+      },
+      "required": ["email", "displayName", "role", "status"]
+    },
+    "Agent": {
+      "title": "Agent",
+      "description": "A sales agent whose calls are audited",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "campaign": { "type": "string" },
+        "status": { "type": "string", "enum": ["Active", "Inactive"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "email", "status"]
+    },
+    "Project": {
+      "title": "Project",
+      "description": "A project or campaign with specific probing questions",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "status": { "type": "string", "enum": ["Active", "Inactive"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "status"]
+    },
+    "ProbingQuestion": {
+      "title": "Probing Question",
+      "description": "A specific question required for a project",
+      "type": "object",
+      "properties": {
+        "projectId": { "type": "string" },
+        "questionText": { "type": "string" },
+        "isRequired": { "type": "boolean" },
+        "weight": { "type": "number" }
+      },
+      "required": ["projectId", "questionText", "isRequired"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "System users and their roles"
+    },
+    "/agents/{agentId}": {
+      "schema": { "$ref": "#/entities/Agent" },
+      "description": "Sales agents"
+    },
+    "/projects/{projectId}": {
+      "schema": { "$ref": "#/entities/Project" },
+      "description": "Projects and campaigns"
+    },
+    "/projects/{projectId}/probing_questions/{questionId}": {
+      "schema": { "$ref": "#/entities/ProbingQuestion" },
+      "description": "Probing questions for a specific project"
+    }
+  }
+}
