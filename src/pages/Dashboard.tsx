@@ -1,5 +1,4 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { GoogleGenAI, Type } from "@google/genai";
 import { 
   Upload, 
   FileAudio, 
@@ -15,34 +14,13 @@ import {
   Menu,
   PlayCircle
 } from 'lucide-react';
-
-// Types
-interface TranscriptSegment {
-  speaker: 'Agent' | 'Prospect';
-  text: string;
-}
-
-interface EvaluationScores {
-  greeting: number;
-  discovery: number;
-  valueProp: number;
-  objectionHandling: number;
-  closing: number;
-}
-
-interface CallAudit {
-  id: string;
-  filename: string;
-  status: 'pending' | 'processing' | 'completed' | 'error';
-  transcript?: TranscriptSegment[];
-  scores?: EvaluationScores;
-  summary?: string;
-  overallScore?: number;
-  feedback?: string[];
-  audioUrl?: string;
-  timestamp: number;
-  errorMsg?: string;
-}
+import { 
+  subscribeToCallAudits, 
+  createCallAuditDoc, 
+  updateCallAuditDoc, 
+  deleteCallAuditDoc,
+  CallAudit
+} from '../lib/firestoreService';
 
 const QUALITY_CRITERIA = [
   { key: 'greeting', label: 'Greeting & Introduction', desc: 'Clarity, brand mention, and rapport.' },
@@ -111,33 +89,40 @@ const SAMPLE_AUDITS: CallAudit[] = [
 
 export default function Dashboard() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [audits, setAudits] = useState<CallAudit[]>(() => {
-    const saved = localStorage.getItem('callAudits');
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        if (parsed.length > 0) {
-          return parsed.map((a: CallAudit) => ({
-            ...a,
-            audioUrl: a.audioUrl?.startsWith('blob:') ? undefined : a.audioUrl
-          }));
-        }
-      } catch (e) {
-        console.error('Failed to parse cached audits', e);
-      }
-    }
-    return SAMPLE_AUDITS;
-  });
-
-  useEffect(() => {
-    localStorage.setItem('callAudits', JSON.stringify(audits));
-  }, [audits]);
-
-  const [selectedAuditId, setSelectedAuditId] = useState<string | null>(audits.length > 0 ? audits[0].id : null);
+  const [audits, setAudits] = useState<CallAudit[]>([]);
+  const [selectedAuditId, setSelectedAuditId] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [localAudios, setLocalAudios] = useState<Record<string, string>>({}); // Temp storage for uploaded audio blobs in current tab session
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Subscribe to real-time audits in Firestore on mount
+  useEffect(() => {
+    const unsubscribe = subscribeToCallAudits(async (fetchedAudits) => {
+      if (fetchedAudits.length === 0) {
+        // Bootstrap standard demo records on first connect
+        for (const sample of SAMPLE_AUDITS) {
+          await createCallAuditDoc(sample);
+        }
+      } else {
+        setAudits(fetchedAudits);
+        setSelectedAuditId(prev => {
+          if (prev && fetchedAudits.some(a => a.id === prev)) return prev;
+          return fetchedAudits[0]?.id || null;
+        });
+      }
+    }, (error) => {
+      console.error("Firestore subscriber error:", error);
+    });
+    return () => unsubscribe();
+  }, []);
+
   const selectedAudit = audits.find(a => a.id === selectedAuditId);
+
+  // Combine Firestore representations with temporary local session blobs if available
+  const activeSelectedAudit = selectedAudit ? {
+    ...selectedAudit,
+    audioUrl: localAudios[selectedAudit.id] || selectedAudit.audioUrl
+  } : null;
 
   const fileToBase64 = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
@@ -185,50 +170,52 @@ export default function Dashboard() {
       const sc = result.scores;
       const overall = (sc.greeting + sc.discovery + sc.valueProp + sc.objectionHandling + sc.closing) / 5;
 
-      setAudits(prev => prev.map(a => a.id === id ? {
-        ...a,
+      await updateCallAuditDoc(id, {
         status: 'completed',
         transcript: result.transcript,
         scores: result.scores,
         summary: result.summary,
         feedback: result.feedback,
         overallScore: Math.round(overall * 10) / 10
-      } : a));
+      });
 
     } catch (error: any) {
       console.error("Audit failed:", error);
-      setAudits(prev => prev.map(a => a.id === id ? { 
-        ...a, 
+      await updateCallAuditDoc(id, {
         status: 'error',
         errorMsg: error.message || "An unexpected error occurred during audio file analysis."
-      } : a));
+      });
     }
   };
 
-  const handleFiles = (files: FileList | File[]) => {
-    const newAudits: CallAudit[] = [];
-    Array.from(files).forEach((file: File) => {
-      if (!file.type.startsWith('audio/') && !file.name.toLowerCase().endsWith('.aac')) {
-         return;
-      }
+  const handleFiles = async (files: FileList | File[]) => {
+    const audioFiles = Array.from(files).filter((file: File) => file.type.startsWith('audio/') || file.name.toLowerCase().endsWith('.aac'));
+    if (audioFiles.length === 0) return;
 
-      const id = Math.random().toString(36).substring(7);
-      const url = URL.createObjectURL(file);
+    for (const file of audioFiles) {
+      const id = 'audit_' + Math.random().toString(36).substring(7) + '_' + Date.now();
+      const tempBlobUrl = URL.createObjectURL(file);
       
+      // Store blob URL locally in current browser tab session
+      setLocalAudios(prev => ({ ...prev, [id]: tempBlobUrl }));
+
       const newAudit: CallAudit = {
         id,
         filename: file.name,
-        status: 'processing',
-        timestamp: Date.now(),
-        audioUrl: url
+        status: 'pending',
+        timestamp: Date.now()
       };
-      newAudits.push(newAudit);
-      processCall(id, file);
-    });
 
-    if (newAudits.length > 0) {
-      setAudits(prev => [...newAudits, ...prev]);
-      setSelectedAuditId(newAudits[0].id);
+      try {
+        await createCallAuditDoc(newAudit);
+        // Transition instantly to processing state
+        await updateCallAuditDoc(id, { status: 'processing' });
+        
+        processCall(id, file);
+        setSelectedAuditId(id);
+      } catch (err) {
+        console.error("Failed to write processing call record to Firestore:", err);
+      }
     }
   };
 
@@ -260,9 +247,13 @@ export default function Dashboard() {
     }
   };
 
-  const removeAudit = (id: string) => {
-    setAudits(prev => prev.filter(a => a.id !== id));
-    if (selectedAuditId === id) setSelectedAuditId(null);
+  const removeAudit = async (id: string) => {
+    try {
+      await deleteCallAuditDoc(id);
+      if (selectedAuditId === id) setSelectedAuditId(null);
+    } catch (err) {
+      console.error("Failed to delete audit recording:", err);
+    }
   };
 
   const getStatusIcon = (status: string) => {
@@ -351,14 +342,14 @@ export default function Dashboard() {
         {!sidebarOpen && (
           <button
             onClick={() => setSidebarOpen(true)}
-            className="absolute top-8 left-8 z-55 p-2.5 bg-white/80 hover:bg-[#F1F3F5] rounded-xl text-black transition-all flex items-center justify-center shadow-md border border-[#E5E7EB] backdrop-blur-md"
+            className="absolute top-8 left-8 z-30 p-2.5 bg-white/80 hover:bg-[#F1F3F5] rounded-xl text-black transition-all flex items-center justify-center shadow-md border border-[#E5E7EB] backdrop-blur-md cursor-pointer"
             title="Show Recent Audits"
           >
             <Menu className="w-5 h-5" />
           </button>
         )}
 
-        {selectedAudit ? (
+        {activeSelectedAudit ? (
           <div className="flex flex-col h-full font-medium">
             <header className="bg-white p-8 flex justify-between items-center z-10 border-b border-[#F1F3F5]">
               <div className="flex items-center gap-4">
@@ -376,19 +367,19 @@ export default function Dashboard() {
                     <div className="w-12 h-12 rounded-2xl bg-black flex items-center justify-center text-white shadow-md">
                       <FileAudio className="w-6 h-6" />
                     </div>
-                    {selectedAudit.filename}
+                    {activeSelectedAudit.filename}
                   </h2>
                   <p className="text-sm text-[#6B7280] font-medium mt-2">
-                    Audited on {new Date(selectedAudit.timestamp).toLocaleDateString()}
+                    Audited on {new Date(activeSelectedAudit.timestamp).toLocaleDateString()}
                   </p>
                 </div>
               </div>
               
-              {selectedAudit.status === 'completed' && (
+              {activeSelectedAudit.status === 'completed' && (
                 <div className="flex items-center gap-6">
-                  <div className="score-ring shadow-lg" style={{ '--score-deg': `${(selectedAudit.overallScore || 0) * 36}deg` } as React.CSSProperties}>
+                  <div className="score-ring shadow-lg" style={{ '--score-deg': `${(activeSelectedAudit.overallScore || 0) * 36}deg` } as React.CSSProperties}>
                     <div className="score-ring-value">
-                      {selectedAudit.overallScore}
+                      {activeSelectedAudit.overallScore}
                     </div>
                   </div>
                 </div>
@@ -398,17 +389,17 @@ export default function Dashboard() {
             <div className="flex-1 flex overflow-hidden">
               <div className="flex-1 overflow-y-auto p-8 transcript-container bg-[#F8F9FA] rounded-tl-3xl shadow-[inset_4px_4px_24px_rgba(0,0,0,0.02)]">
                 <div className="max-w-3xl mx-auto space-y-8">
-                  {selectedAudit.status === 'processing' ? (
+                  {activeSelectedAudit.status === 'processing' ? (
                     <div className="flex flex-col items-center justify-center h-64 text-[#6B7280] py-20">
                       <div className="w-12 h-12 border-4 border-[#F1F3F5] border-t-black rounded-full animate-spin mb-4"></div>
                       <p className="font-bold font-display text-lg text-black">Analyzing conversation with Gemini...</p>
                       <p className="text-sm mt-1">Transcribing and scoring performance using gemini-3.5-flash...</p>
                     </div>
-                  ) : selectedAudit.status === 'completed' ? (
+                  ) : activeSelectedAudit.status === 'completed' ? (
                     <>
                       <div className="sticky top-0 glass-card py-4 px-6 rounded-2xl mb-8 z-10 flex items-center gap-4">
-                        {selectedAudit.audioUrl ? (
-                          <audio src={selectedAudit.audioUrl} controls className="flex-1 h-10" />
+                        {activeSelectedAudit.audioUrl ? (
+                          <audio src={activeSelectedAudit.audioUrl} controls className="flex-1 h-10" />
                         ) : (
                           <div className="flex-1 h-10 flex items-center text-sm text-[#6B7280] italic px-4 bg-[#F1F3F5] rounded-xl font-medium">
                             Audio recording unavailable for cached sessions.
@@ -416,10 +407,10 @@ export default function Dashboard() {
                         )}
                       </div>
                       <div className="space-y-6">
-                        {selectedAudit.transcript?.map((line, i) => (
+                        {activeSelectedAudit.transcript?.map((line, i) => (
                           <div key={i} className={`flex gap-4 ${line.speaker === 'Agent' ? 'flex-row' : 'flex-row-reverse'}`}>
                             <div className={`w-10 h-10 rounded-full flex-shrink-0 flex items-center justify-center font-bold font-display text-sm shadow-sm ${line.speaker === 'Agent' ? 'bg-black text-white' : 'bg-white text-black border border-[#E5E7EB]'}`}>
-                              {line.speaker === 'Agent' ? 'AG' : 'PR'}
+                               {line.speaker === 'Agent' ? 'AG' : 'PR'}
                             </div>
                             <div className={`max-w-[80%] rounded-2xl px-5 py-4 shadow-sm ${line.speaker === 'Agent' ? 'bg-white rounded-tl-none border border-[#E5E7EB]' : 'bg-black text-white rounded-tr-none'}`}>
                               <div className={`text-xs font-bold font-display mb-1.5 ${line.speaker === 'Agent' ? 'text-[#6B7280]' : 'text-gray-400'}`}>{line.speaker}</div>
@@ -434,7 +425,7 @@ export default function Dashboard() {
                       <AlertCircle className="w-16 h-16 text-rose-500 mx-auto mb-6 anim-pulse" />
                       <h3 className="text-2xl font-display font-bold text-black tracking-tight">Analysis Failed</h3>
                       <p className="text-rose-600 font-medium text-sm bg-rose-50 border border-rose-100 p-4 rounded-xl mt-4 text-left font-mono whitespace-pre-wrap break-words">
-                        {selectedAudit.errorMsg || "An unknown error occurred during parsing."}
+                        {activeSelectedAudit.errorMsg || "An unknown error occurred during parsing."}
                       </p>
                       
                       <div className="mt-6 text-left text-sm text-[#6B7280] space-y-2">
@@ -451,7 +442,7 @@ export default function Dashboard() {
               </div>
 
               <aside className="w-[420px] overflow-y-auto p-8 bg-white border-l border-[#F1F3F5]">
-                {selectedAudit.status === 'completed' && (
+                {activeSelectedAudit.status === 'completed' && (
                   <div className="space-y-10">
                     <section>
                       <h3 className="text-xs font-bold font-display uppercase tracking-widest text-[#6B7280] mb-4 flex items-center gap-2">
@@ -459,7 +450,7 @@ export default function Dashboard() {
                         Executive Summary
                       </h3>
                       <p className="text-[15px] text-[#111827] bg-[#F8F9FA] p-6 rounded-2xl leading-relaxed font-medium">
-                        {selectedAudit.summary}
+                        {activeSelectedAudit.summary}
                       </p>
                     </section>
 
@@ -470,7 +461,7 @@ export default function Dashboard() {
                       </h3>
                       <div className="space-y-4">
                         {QUALITY_CRITERIA.map((item) => {
-                          const score = (selectedAudit.scores as any)[item.key] || 0;
+                          const score = (activeSelectedAudit.scores as any)[item.key] || 0;
                           return (
                             <div key={item.key} className="bg-white p-5 rounded-2xl shadow-[0_4px_20px_rgb(0,0,0,0.04)]">
                               <div className="flex justify-between items-start mb-3">
@@ -500,7 +491,7 @@ export default function Dashboard() {
                         Coaching Opportunities
                       </h3>
                       <div className="space-y-4">
-                        {selectedAudit.feedback?.map((f, i) => (
+                        {activeSelectedAudit.feedback?.map((f, i) => (
                           <div key={i} className="flex gap-4 text-[15px] p-5 bg-[#F8F9FA] rounded-2xl text-[#111827] font-medium">
                             <div className="w-6 h-6 bg-black text-white rounded-full flex items-center justify-center flex-shrink-0 text-xs font-bold font-display shadow-sm">
                               {i + 1}
@@ -520,7 +511,7 @@ export default function Dashboard() {
             {!sidebarOpen && (
               <button
                 onClick={() => setSidebarOpen(true)}
-                className="absolute top-8 left-8 p-3 bg-white hover:bg-[#F1F3F5] rounded-2xl text-black transition-all flex items-center gap-2 shadow-md border border-[#E5E7EB]"
+                className="absolute top-8 left-8 z-30 p-3 bg-white hover:bg-[#F1F3F5] rounded-2xl text-black transition-all flex items-center gap-2 shadow-md border border-[#E5E7EB] cursor-pointer"
                 title="Show Recent Audits"
               >
                 <Menu className="w-5 h-5" />

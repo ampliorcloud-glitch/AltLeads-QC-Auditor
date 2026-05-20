@@ -107,6 +107,22 @@ service cloud.firestore {
              (!('weight' in data) || data.weight is number);
     }
 
+    function isValidCallAudit(data) {
+      return hasOnlyAllowedFields(['id', 'filename', 'status', 'timestamp', 'overallScore', 'scores', 'summary', 'feedback', 'transcript', 'audioUrl', 'errorMsg']) &&
+             data.filename is string && data.filename.size() > 0 &&
+             data.status in ['pending', 'processing', 'completed', 'error'] &&
+             data.timestamp is number;
+    }
+
+    function isValidSettings(data) {
+      return hasOnlyAllowedFields(['companyName', 'companyOffering', 'slaThreshold', 'enableRoleResolution', 'modelTier', 'scoringWeights', 'geminiApiKey', 'updatedAt']) &&
+             data.companyName is string && data.companyName.size() > 0 &&
+             data.companyOffering is string &&
+             data.slaThreshold is number &&
+             data.enableRoleResolution is bool &&
+             data.modelTier is string;
+    }
+
     // ===============================================================
     // Rules
     // ===============================================================
@@ -145,6 +161,19 @@ service cloud.firestore {
         allow update: if (isAdmin() || isTL()) && isValidProbingQuestion(request.resource.data, projectId);
         allow delete: if isAdmin() || isTL();
       }
+    }
+
+    match /call_audits/{auditId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidCallAudit(request.resource.data);
+      allow update: if isAuthenticated() && isValidCallAudit(request.resource.data);
+      allow delete: if isAuthenticated();
+    }
+
+    match /settings/{settingsId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated() && isValidSettings(request.resource.data);
+      allow delete: if isAdmin();
     }
   }
 }

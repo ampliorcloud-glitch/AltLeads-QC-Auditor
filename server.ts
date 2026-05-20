@@ -1,5 +1,6 @@
 import express from "express";
 import path from "path";
+import fs from "fs";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
 
@@ -22,11 +23,38 @@ async function startServer() {
         return res.status(400).json({ error: "Missing required parameters: data and mimeType are required." });
       }
 
-      const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
+      let apiKey = null;
+      try {
+        const configPath = path.join(process.cwd(), "firebase-applet-config.json");
+        if (fs.existsSync(configPath)) {
+          const firebaseConfig = JSON.parse(fs.readFileSync(configPath, "utf8"));
+          const { initializeApp: serverInitApp } = await import("firebase/app");
+          const { getFirestore: serverGetFirestore, doc: serverDoc, getDoc: serverGetDoc } = await import("firebase/firestore");
+          
+          const appInstance = serverInitApp(firebaseConfig);
+          const firestoredb = serverGetFirestore(appInstance, firebaseConfig.firestoreDatabaseId);
+          const settingsSnap = await serverGetDoc(serverDoc(firestoredb, "settings", "workspace"));
+          
+          if (settingsSnap.exists()) {
+            const settingsData = settingsSnap.data();
+            if (settingsData && settingsData.geminiApiKey && settingsData.geminiApiKey.trim()) {
+              apiKey = settingsData.geminiApiKey.trim();
+              console.log("Found shared custom Gemini API Key in workspace settings document. Utilizing for call audit.");
+            }
+          }
+        }
+      } catch (dbError) {
+        console.warn("Could not query settings workspace document for custom API key. Defaulting to server env keys.", dbError);
+      }
+
       if (!apiKey) {
-        console.error("GEMINI_API_KEY is not defined in server environment.");
+        apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
+      }
+
+      if (!apiKey) {
+        console.error("No valid Gemini API key found (neither custom Settings key nor server environment variable).");
         return res.status(500).json({ 
-          error: "API key is missing in server environment. Please define GEMINI_API_KEY in Settings > Secrets." 
+          error: "API key is missing. Please define your custom Gemini Key in Settings, or add GEMINI_API_KEY as a workspace secret." 
         });
       }
 
@@ -128,7 +156,7 @@ async function startServer() {
   } else {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
-    app.get('*', (req, res) => {
+    app.get('*all', (req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }

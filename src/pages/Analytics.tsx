@@ -27,24 +27,10 @@ import {
   Layers,
   Sparkles
 } from 'lucide-react';
-
-interface EvaluationScores {
-  greeting: number;
-  discovery: number;
-  valueProp: number;
-  objectionHandling: number;
-  closing: number;
-}
-
-interface CallAudit {
-  id: string;
-  filename: string;
-  status: 'pending' | 'processing' | 'completed' | 'error';
-  timestamp: number;
-  overallScore?: number;
-  scores?: EvaluationScores;
-  summary?: string;
-}
+import { 
+  subscribeToCallAudits, 
+  CallAudit 
+} from '../lib/firestoreService';
 
 const QUALITY_CRITERIA_KEYS = [
   { key: 'greeting', label: 'Greeting' },
@@ -54,56 +40,30 @@ const QUALITY_CRITERIA_KEYS = [
   { key: 'closing', label: 'Closing' }
 ];
 
-const DEFAULT_SAMPLE_AUDITS: CallAudit[] = [
-  {
-    id: 'sample-1',
-    filename: 'Q3_Enterprise_Pitch_Sarah.mp3',
-    status: 'completed',
-    timestamp: Date.now() - 86400000,
-    overallScore: 8.4,
-    scores: {
-      greeting: 9,
-      discovery: 8,
-      valueProp: 9,
-      objectionHandling: 7,
-      closing: 9
-    }
-  },
-  {
-    id: 'sample-2',
-    filename: 'Inbound_Lead_Tech_Startup.wav',
-    status: 'completed',
-    timestamp: Date.now() - 172800000,
-    overallScore: 6.2,
-    scores: {
-      greeting: 7,
-      discovery: 5,
-      valueProp: 6,
-      objectionHandling: 5,
-      closing: 8
-    }
-  }
-];
-
 export default function Analytics() {
   const [audits, setAudits] = useState<CallAudit[]>([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const saved = localStorage.getItem('callAudits');
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        const completedOnly = parsed.filter((a: any) => a.status === 'completed');
-        if (completedOnly.length > 0) {
-          setAudits(completedOnly);
-          return;
-        }
-      } catch (e) {
-        console.error('Failed to parse cached audits in analytics', e);
-      }
-    }
-    setAudits(DEFAULT_SAMPLE_AUDITS);
+    const unsubscribe = subscribeToCallAudits((fetchedAudits) => {
+      const completedOnly = fetchedAudits.filter((a) => a.status === 'completed');
+      setAudits(completedOnly);
+      setLoading(false);
+    }, (error) => {
+      console.error('Failed to stream real-time audits for analytics:', error);
+      setLoading(false);
+    });
+    return () => unsubscribe();
   }, []);
+
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center justify-center py-32 space-y-4">
+        <div className="w-12 h-12 border-4 border-[#F1F3F5] border-t-black rounded-full animate-spin"></div>
+        <p className="text-[#6B7280] font-bold font-display text-lg">Assembling real-time behavioral insights...</p>
+      </div>
+    );
+  }
 
   // Compute stats
   const totalCalls = audits.length;

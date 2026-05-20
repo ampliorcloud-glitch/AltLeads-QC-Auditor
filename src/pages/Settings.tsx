@@ -10,25 +10,16 @@ import {
   ToggleRight,
   Database,
   Building,
-  Activity
+  Activity,
+  Key
 } from 'lucide-react';
+import { 
+  getWorkspaceSettings, 
+  saveWorkspaceSettings, 
+  SettingsData as FirestoreSettingsData 
+} from '../lib/firestoreService';
 
-interface SettingsData {
-  companyName: string;
-  companyOffering: string;
-  slaThreshold: number;
-  enableRoleResolution: boolean;
-  modelTier: 'standard' | 'quantum' | 'advanced';
-  scoringWeights: {
-    greeting: number;
-    discovery: number;
-    valueProp: number;
-    objectionHandling: number;
-    closing: number;
-  };
-}
-
-const DEFAULT_SETTINGS: SettingsData = {
+const DEFAULT_SETTINGS: FirestoreSettingsData = {
   companyName: 'AltLeads',
   companyOffering: 'Enterprise coaching, leadership modules, and sales reduction ramp solutions.',
   slaThreshold: 7.0,
@@ -44,46 +35,69 @@ const DEFAULT_SETTINGS: SettingsData = {
 };
 
 export default function Settings() {
-  const [settings, setSettings] = useState<SettingsData>(() => {
-    const saved = localStorage.getItem('auditSettings');
-    if (saved) {
-      try {
-        return { ...DEFAULT_SETTINGS, ...JSON.parse(saved) };
-      } catch (e) {
-        console.error('Failed to parse settings cache', e);
-      }
-    }
-    return DEFAULT_SETTINGS;
-  });
-
+  const [settings, setSettings] = useState<FirestoreSettingsData>(DEFAULT_SETTINGS);
+  const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'standards' | 'profile' | 'system'>('standards');
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   useEffect(() => {
-    localStorage.setItem('auditSettings', JSON.stringify(settings));
-  }, [settings]);
+    async function loadSettings() {
+      try {
+        setLoading(true);
+        const fetched = await getWorkspaceSettings();
+        if (fetched) {
+          setSettings(fetched);
+        } else {
+          // If no workspace settings, create initial default doc
+          await saveWorkspaceSettings(DEFAULT_SETTINGS);
+          setSettings(DEFAULT_SETTINGS);
+        }
+      } catch (err) {
+        console.error('Failed to load shared workspace settings:', err);
+      } finally {
+        setLoading(false);
+      }
+    }
+    loadSettings();
+  }, []);
 
-  const handleSave = (e: React.FormEvent) => {
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    localStorage.setItem('auditSettings', JSON.stringify(settings));
-    setSaveSuccess(true);
-    setTimeout(() => setSaveSuccess(false), 3000);
+    try {
+      setSaveError(null);
+      await saveWorkspaceSettings(settings);
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 3000);
+    } catch (err: any) {
+      console.error('Failed to save settings to Firestore:', err);
+      setSaveError('Failed to update workspace configuration in Firestore.');
+    }
   };
 
   const handleResetCache = () => {
-    if (window.confirm('Are you sure you want to delete all audited calls and restore defaults? This action is permanent.')) {
+    if (window.confirm('Are you sure you want to delete all audited calls from the workspace? This action is permanent.')) {
+      // Clear localStorage cache and direct reload
       localStorage.removeItem('callAudits');
-      // Force reload the page so uploader & analytics sync to default states
       window.location.reload();
     }
   };
 
-  const updateWeight = (key: keyof SettingsData['scoringWeights'], val: number) => {
+  const updateWeight = (key: keyof FirestoreSettingsData['scoringWeights'], val: number) => {
     setSettings(prev => {
       const updatedWeights = { ...prev.scoringWeights, [key]: val };
       return { ...prev, scoringWeights: updatedWeights };
     });
   };
+
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center justify-center py-32 space-y-4">
+        <div className="w-12 h-12 border-4 border-[#F1F3F5] border-t-black rounded-full animate-spin"></div>
+        <p className="text-[#6B7280] font-bold font-display text-lg">Loading shared workspace calibration...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-8 pb-12 animate-fade-in max-w-4xl">
@@ -95,14 +109,21 @@ export default function Settings() {
             Workspace Calibration
           </h2>
           <p className="text-[#6B7280] mt-1.5 font-medium">
-            Customize scoring parameters, business details, and model evaluation constraints.
+            Customize scoring parameters, business details, and model evaluation constraints in Firestore for all users.
           </p>
         </div>
-        {saveSuccess && (
-          <div className="text-xs font-semibold text-emerald-600 bg-emerald-50 px-4 py-2 rounded-xl border border-emerald-100 flex items-center gap-2 animate-bounce">
-            <CheckCircle2 className="w-3.5 h-3.5" /> Workspace Config Saved
-          </div>
-        )}
+        <div className="flex flex-col items-end gap-2">
+          {saveSuccess && (
+            <div className="text-xs font-semibold text-emerald-600 bg-emerald-50 px-4 py-2 rounded-xl border border-emerald-100 flex items-center gap-2 animate-bounce">
+              <CheckCircle2 className="w-3.5 h-3.5" /> Workspace Config Saved
+            </div>
+          )}
+          {saveError && (
+            <div className="text-xs font-semibold text-rose-600 bg-rose-50 px-4 py-2 rounded-xl border border-rose-100 flex items-center gap-2">
+              {saveError}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Settings Navigation Tabs */}
@@ -256,6 +277,25 @@ export default function Settings() {
                   Local Cache & Diagnostics
                 </h3>
                 <p className="text-xs text-[#6B7280] font-medium mt-1">Reset call history index, manage workspace memory, and review system configuration.</p>
+              </div>
+
+              {/* Shared Gemini Api Key section */}
+              <div className="bg-white p-6 rounded-2xl border border-[#E5E7EB] shadow-sm space-y-4">
+                <h4 className="text-sm font-bold text-black font-display flex items-center gap-2">
+                  <Key className="w-4 h-4 text-[#6B7280]" /> Workspace Shared Gemini API Key
+                </h4>
+                <div>
+                  <input 
+                    type="password" 
+                    placeholder="Enter your custom Gemini API key (e.g. AIzaSy...)"
+                    value={settings.geminiApiKey || ''}
+                    onChange={(e) => setSettings(prev => ({ ...prev, geminiApiKey: e.target.value }))}
+                    className="w-full bg-[#F8F9FA] border border-[#E5E7EB] rounded-xl px-4 py-3 text-sm font-medium focus:outline-none focus:ring-1 focus:ring-black focus:bg-white text-black font-mono shadow-sm"
+                  />
+                  <p className="text-xs text-[#6B7280] mt-1.5 font-medium leading-relaxed">
+                    If defined, this key is securely stored in your shared workspace Firestore database so other team members can also utilize it. If left empty, the application will fallback to the default workspace system API key.
+                  </p>
+                </div>
               </div>
 
               <div className="bg-[#FFF5F5] p-6 rounded-2xl border border-[#FEE2E2]">

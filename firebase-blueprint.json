@@ -50,6 +50,37 @@
         "weight": { "type": "number" }
       },
       "required": ["projectId", "questionText", "isRequired"]
+    },
+    "CallAudit": {
+      "title": "Call Audit",
+      "description": "An audited audio call containing transcript, scores and feedback",
+      "type": "object",
+      "properties": {
+        "filename": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "processing", "completed", "error"] },
+        "timestamp": { "type": "number" },
+        "overallScore": { "type": "number" },
+        "summary": { "type": "string" },
+        "feedback": { "type": "array" },
+        "transcript": { "type": "array" },
+        "errorMsg": { "type": "string" }
+      },
+      "required": ["filename", "status", "timestamp"]
+    },
+    "Settings": {
+      "title": "Settings",
+      "description": "Global settings and constraints, including optional shared custom Gemini API Key",
+      "type": "object",
+      "properties": {
+        "companyName": { "type": "string" },
+        "companyOffering": { "type": "string" },
+        "slaThreshold": { "type": "number" },
+        "enableRoleResolution": { "type": "boolean" },
+        "modelTier": { "type": "string" },
+        "geminiApiKey": { "type": "string" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["companyName", "companyOffering"]
     }
   },
   "firestore": {
@@ -68,6 +99,14 @@
     "/projects/{projectId}/probing_questions/{questionId}": {
       "schema": { "$ref": "#/entities/ProbingQuestion" },
       "description": "Probing questions for a specific project"
+    },
+    "/call_audits/{auditId}": {
+      "schema": { "$ref": "#/entities/CallAudit" },
+      "description": "Audited call results"
+    },
+    "/settings/{settingsId}": {
+      "schema": { "$ref": "#/entities/Settings" },
+      "description": "Global workshop settings and keys"
     }
   }
 }
