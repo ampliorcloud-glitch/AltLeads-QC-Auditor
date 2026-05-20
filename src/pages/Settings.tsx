@@ -25,6 +25,7 @@ const DEFAULT_SETTINGS: FirestoreSettingsData = {
   slaThreshold: 7.0,
   enableRoleResolution: true,
   modelTier: 'standard',
+  customModel: 'gemini-3.5-flash',
   scoringWeights: {
     greeting: 20,
     discovery: 20,
@@ -35,8 +36,17 @@ const DEFAULT_SETTINGS: FirestoreSettingsData = {
 };
 
 export default function Settings() {
-  const [settings, setSettings] = useState<FirestoreSettingsData>(DEFAULT_SETTINGS);
-  const [loading, setLoading] = useState(true);
+  const [settings, setSettings] = useState<FirestoreSettingsData>(() => {
+    const saved = localStorage.getItem('auditSettings');
+    if (saved) {
+      try {
+        return { ...DEFAULT_SETTINGS, ...JSON.parse(saved) };
+      } catch (e) {
+        console.error('Failed to parse cached settings local backup', e);
+      }
+    }
+    return DEFAULT_SETTINGS;
+  });
   const [activeTab, setActiveTab] = useState<'standards' | 'profile' | 'system'>('standards');
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -44,19 +54,12 @@ export default function Settings() {
   useEffect(() => {
     async function loadSettings() {
       try {
-        setLoading(true);
         const fetched = await getWorkspaceSettings();
         if (fetched) {
           setSettings(fetched);
-        } else {
-          // If no workspace settings, create initial default doc
-          await saveWorkspaceSettings(DEFAULT_SETTINGS);
-          setSettings(DEFAULT_SETTINGS);
         }
       } catch (err) {
         console.error('Failed to load shared workspace settings:', err);
-      } finally {
-        setLoading(false);
       }
     }
     loadSettings();
@@ -89,15 +92,6 @@ export default function Settings() {
       return { ...prev, scoringWeights: updatedWeights };
     });
   };
-
-  if (loading) {
-    return (
-      <div className="flex flex-col items-center justify-center py-32 space-y-4">
-        <div className="w-12 h-12 border-4 border-[#F1F3F5] border-t-black rounded-full animate-spin"></div>
-        <p className="text-[#6B7280] font-bold font-display text-lg">Loading shared workspace calibration...</p>
-      </div>
-    );
-  }
 
   return (
     <div className="space-y-8 pb-12 animate-fade-in max-w-4xl">
@@ -177,18 +171,86 @@ export default function Settings() {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-bold text-black font-display mb-2">Evaluation Model Environment</label>
+                  <label className="block text-sm font-bold text-black font-display mb-2">Workspace Model Environment Tier</label>
                   <select
                     value={settings.modelTier}
                     onChange={(e) => setSettings(prev => ({ ...prev, modelTier: e.target.value as any }))}
                     className="w-full bg-[#F8F9FA] border border-[#E5E7EB] rounded-xl px-4 py-3 text-sm font-medium focus:outline-none focus:ring-1 focus:ring-black focus:bg-white text-black"
                   >
-                    <option value="standard">Gemini 3.5 Flash (Optimized Speed)</option>
-                    <option value="advanced">Gemini 1.5 Pro (Extreme Precision)</option>
-                    <option value="quantum">Gemini Experimental Cognitive</option>
+                    <option value="standard">Standard Tier (Flash)</option>
+                    <option value="advanced">Advanced Tier (Pro)</option>
+                    <option value="quantum">Quantum Experimental Tier</option>
                   </select>
-                  <p className="text-xs text-[#6B7280] mt-1.5 font-medium">Default server selection matches current container specifications.</p>
+                  <p className="text-xs text-[#6B7280] mt-1.5 font-medium">Global workspace classification mapped to default container execution settings.</p>
                 </div>
+              </div>
+
+              {/* Gemini Key & Model Calibration */}
+              <div className="bg-[#F8F9FA] p-6 rounded-2xl border border-[#E5E7EB] space-y-4 shadow-sm mt-6">
+                <div className="flex items-center justify-between border-b border-[#F1F3F5] pb-3">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="w-5 h-5 text-black animate-pulse" />
+                    <h4 className="text-sm font-bold text-black font-display">Personal Acoustic AI configuration (Local Cache Backup)</h4>
+                  </div>
+                  <span className="text-[10px] bg-emerald-50 text-emerald-700 font-bold px-2 py-0.5 rounded-full border border-emerald-100">
+                    Saves to Local Cache Instantly
+                  </span>
+                </div>
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <label className="block text-sm font-bold text-black font-display mb-1.5 font-sans">Acoustic Audit Model Select</label>
+                    <select
+                      value={['gemini-3.5-flash', 'gemini-3.1-pro-preview', 'gemini-3.1-flash-lite'].includes(settings.customModel || '') ? settings.customModel : 'custom'}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (val === 'custom') {
+                          setSettings(prev => ({ ...prev, customModel: prev.customModel || 'gemini-3.5-flash' }));
+                        } else {
+                          setSettings(prev => ({ ...prev, customModel: val }));
+                        }
+                      }}
+                      className="w-full bg-white border border-[#E5E7EB] rounded-xl px-4 py-3 text-sm font-medium focus:outline-none focus:ring-1 focus:ring-black text-black"
+                    >
+                      <option value="gemini-3.5-flash">Gemini 3.5 Flash (Default - Recommended speed & quality)</option>
+                      <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro (Heavyweight reasoning & deep quality)</option>
+                      <option value="gemini-3.1-flash-lite">Gemini 3.1 Flash Lite (Ultra low-latency cost optimized)</option>
+                      <option value="custom">Custom Model Identifier...</option>
+                    </select>
+                    <p className="text-xs text-[#6B7280] mt-1.5 font-medium">Select a specific cognitive model. Overrides default server parameters.</p>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-bold text-black font-display mb-1.5 flex items-center gap-1">
+                      <Key className="w-3.5 h-3.5" /> My Personal Gemini API Key
+                    </label>
+                    <input 
+                      type="password" 
+                      placeholder={settings.geminiApiKey ? "••••••••••••••••••••" : "Paste your Gemini API key (AIzaSy...)"}
+                      value={settings.geminiApiKey || ''}
+                      onChange={(e) => setSettings(prev => ({ ...prev, geminiApiKey: e.target.value }))}
+                      className="w-full bg-white border border-[#E5E7EB] rounded-xl px-4 py-3 text-sm font-medium focus:outline-none focus:ring-1 focus:ring-black text-black font-mono shadow-sm"
+                    />
+                    <p className="text-xs text-[#6B7280] mt-1.5 font-medium leading-relaxed">
+                      This key is cached in your browser. Leaving it empty uses default workspace secrets.
+                    </p>
+                  </div>
+                </div>
+
+                {/* If Custom Model option is active, show the nested text-input */}
+                {!['gemini-3.5-flash', 'gemini-3.1-pro-preview', 'gemini-3.1-flash-lite'].includes(settings.customModel || '') && (
+                  <div className="pt-2 animate-fade-in">
+                    <label className="block text-sm font-bold text-black font-display mb-1.5">Custom Model Identifier String</label>
+                    <input 
+                      type="text" 
+                      placeholder="e.g. gemini-2.0-pro-exp-02-05"
+                      value={settings.customModel || ''}
+                      onChange={(e) => setSettings(prev => ({ ...prev, customModel: e.target.value }))}
+                      className="w-full max-w-md bg-white border border-[#E5E7EB] rounded-xl px-4 py-3 text-sm font-medium focus:outline-none focus:ring-1 focus:ring-black text-black font-mono shadow-sm"
+                    />
+                    <p className="text-xs text-[#6B7280] mt-1.5 font-medium">Input any developer-preview or sandbox-only model ID string manually.</p>
+                  </div>
+                )}
               </div>
 
               {/* Multi-speaker resolution toggle */}

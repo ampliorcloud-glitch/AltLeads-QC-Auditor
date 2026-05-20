@@ -41,19 +41,46 @@ const QUALITY_CRITERIA_KEYS = [
 ];
 
 export default function Analytics() {
-  const [audits, setAudits] = useState<CallAudit[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [audits, setAudits] = useState<CallAudit[]>(() => {
+    const saved = localStorage.getItem('callAudits');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        return parsed.filter((a: any) => a.status === 'completed');
+      } catch (e) {
+        console.error('Failed to parse cached analytics backup', e);
+      }
+    }
+    return [];
+  });
+  const [loading, setLoading] = useState(audits.length === 0);
 
   useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      setLoading(false);
+    }, 3500);
+
     const unsubscribe = subscribeToCallAudits((fetchedAudits) => {
+      clearTimeout(timeoutId);
       const completedOnly = fetchedAudits.filter((a) => a.status === 'completed');
       setAudits(completedOnly);
+      
+      try {
+        localStorage.setItem('callAudits', JSON.stringify(fetchedAudits));
+      } catch (e) {
+        console.error('Failed to save to local storage cache', e);
+      }
+      
       setLoading(false);
     }, (error) => {
       console.error('Failed to stream real-time audits for analytics:', error);
+      clearTimeout(timeoutId);
       setLoading(false);
     });
-    return () => unsubscribe();
+    return () => {
+      clearTimeout(timeoutId);
+      unsubscribe();
+    };
   }, []);
 
   if (loading) {

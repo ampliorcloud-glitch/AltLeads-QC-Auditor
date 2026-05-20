@@ -100,6 +100,7 @@ export interface SettingsData {
     closing: number;
   };
   geminiApiKey?: string;
+  customModel?: string;
   updatedAt?: number;
 }
 
@@ -110,15 +111,48 @@ const CALLS_COLLECTION = 'call_audits';
 // Settings Accessors
 export async function getWorkspaceSettings(): Promise<SettingsData | null> {
   const path = `${SETTINGS_COLLECTION}/${SETTINGS_DOC_ID}`;
+  
+  const timeoutPromise = new Promise<null>((_, reject) => 
+    setTimeout(() => reject(new Error("Firestore loading timed out")), 3500)
+  );
+
   try {
     const docRef = doc(db, SETTINGS_COLLECTION, SETTINGS_DOC_ID);
-    const snap = await getDoc(docRef);
-    if (snap.exists()) {
-      return snap.data() as SettingsData;
+    
+    const snap = await Promise.race([
+      getDoc(docRef),
+      timeoutPromise
+    ]) as any;
+
+    if (snap && snap.exists()) {
+      const data = snap.data() as SettingsData;
+      // Backup to localStorage cache
+      localStorage.setItem('auditSettings', JSON.stringify(data));
+      return data;
+    }
+    
+    // Fallback to local storage if document doesn't exist
+    const saved = localStorage.getItem('auditSettings');
+    if (saved) {
+      try {
+        return JSON.parse(saved) as SettingsData;
+      } catch (e) {
+        console.error('Failed to parse cached settings local backup', e);
+      }
     }
     return null;
   } catch (error) {
-    handleFirestoreError(error, OperationType.GET, path);
+    console.warn("Firestore settings load failed or timed out. Falling back to local storage cache.", error);
+    
+    // Fallback to local storage cache on any error/timeout
+    const saved = localStorage.getItem('auditSettings');
+    if (saved) {
+      try {
+        return JSON.parse(saved) as SettingsData;
+      } catch (e) {
+        console.error('Failed to parse cached settings local backup in exception path', e);
+      }
+    }
     return null;
   }
 }
@@ -126,13 +160,22 @@ export async function getWorkspaceSettings(): Promise<SettingsData | null> {
 export async function saveWorkspaceSettings(settings: SettingsData): Promise<void> {
   const path = `${SETTINGS_COLLECTION}/${SETTINGS_DOC_ID}`;
   try {
+    // Sync to local backup instantly
+    localStorage.setItem('auditSettings', JSON.stringify(settings));
+    
     const docRef = doc(db, SETTINGS_COLLECTION, SETTINGS_DOC_ID);
-    await setDoc(docRef, {
+    const writePromise = setDoc(docRef, {
       ...settings,
       updatedAt: Date.now()
     }, { merge: true });
+    
+    const timeoutPromise = new Promise<void>((_, reject) => 
+      setTimeout(() => reject(new Error("Firestore save timed out")), 3500)
+    );
+    
+    await Promise.race([writePromise, timeoutPromise]);
   } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, path);
+    console.warn("Firestore save failed or timed out. Settings are backed up in local storage cache.", error);
   }
 }
 

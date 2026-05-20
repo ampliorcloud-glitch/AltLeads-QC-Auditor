@@ -89,8 +89,29 @@ const SAMPLE_AUDITS: CallAudit[] = [
 
 export default function Dashboard() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [audits, setAudits] = useState<CallAudit[]>([]);
-  const [selectedAuditId, setSelectedAuditId] = useState<string | null>(null);
+  const [audits, setAudits] = useState<CallAudit[]>(() => {
+    const saved = localStorage.getItem('callAudits');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        console.error('Failed to parse cached audits local backup in dashboard', e);
+      }
+    }
+    return [];
+  });
+  const [selectedAuditId, setSelectedAuditId] = useState<string | null>(() => {
+    const saved = localStorage.getItem('callAudits');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        return parsed[0]?.id || null;
+      } catch (e) {
+        console.error('Failed to parse cached audits for ID', e);
+      }
+    }
+    return null;
+  });
   const [isDragging, setIsDragging] = useState(false);
   const [localAudios, setLocalAudios] = useState<Record<string, string>>({}); // Temp storage for uploaded audio blobs in current tab session
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -98,6 +119,12 @@ export default function Dashboard() {
   // Subscribe to real-time audits in Firestore on mount
   useEffect(() => {
     const unsubscribe = subscribeToCallAudits(async (fetchedAudits) => {
+      try {
+        localStorage.setItem('callAudits', JSON.stringify(fetchedAudits));
+      } catch (e) {
+        console.error('Failed to save to local storage cache in dashboard', e);
+      }
+
       if (fetchedAudits.length === 0) {
         // Bootstrap standard demo records on first connect
         for (const sample of SAMPLE_AUDITS) {
@@ -149,6 +176,26 @@ export default function Dashboard() {
         }
       }
 
+      // Check for saved local settings custom API key and custom model selection
+      let customApiKey: string | undefined = undefined;
+      let selectedModel: string | undefined = undefined;
+      const cachedSettings = localStorage.getItem('auditSettings');
+      if (cachedSettings) {
+        try {
+          const parsed = JSON.parse(cachedSettings);
+          if (parsed) {
+            if (parsed.geminiApiKey && parsed.geminiApiKey.trim()) {
+              customApiKey = parsed.geminiApiKey.trim();
+            }
+            if (parsed.customModel && parsed.customModel.trim()) {
+              selectedModel = parsed.customModel.trim();
+            }
+          }
+        } catch (e) {
+          console.warn("Could not retrieve custom key or custom model from cache", e);
+        }
+      }
+
       const response = await fetch("/api/gemini/audit", {
         method: "POST",
         headers: {
@@ -156,7 +203,9 @@ export default function Dashboard() {
         },
         body: JSON.stringify({
           data: base64Data,
-          mimeType: mimeType
+          mimeType: mimeType,
+          apiKey: customApiKey,
+          model: selectedModel
         })
       });
 

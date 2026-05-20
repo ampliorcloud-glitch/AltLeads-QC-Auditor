@@ -17,34 +17,46 @@ async function startServer() {
   // API endpoint for auditing recordings via Gemini API
   app.post("/api/gemini/audit", async (req, res) => {
     try {
-      const { data, mimeType } = req.body;
+      const { data, mimeType, apiKey: clientApiKey, model: clientModel } = req.body;
 
       if (!data || !mimeType) {
         return res.status(400).json({ error: "Missing required parameters: data and mimeType are required." });
       }
 
-      let apiKey = null;
-      try {
-        const configPath = path.join(process.cwd(), "firebase-applet-config.json");
-        if (fs.existsSync(configPath)) {
-          const firebaseConfig = JSON.parse(fs.readFileSync(configPath, "utf8"));
-          const { initializeApp: serverInitApp } = await import("firebase/app");
-          const { getFirestore: serverGetFirestore, doc: serverDoc, getDoc: serverGetDoc } = await import("firebase/firestore");
-          
-          const appInstance = serverInitApp(firebaseConfig);
-          const firestoredb = serverGetFirestore(appInstance, firebaseConfig.firestoreDatabaseId);
-          const settingsSnap = await serverGetDoc(serverDoc(firestoredb, "settings", "workspace"));
-          
-          if (settingsSnap.exists()) {
-            const settingsData = settingsSnap.data();
-            if (settingsData && settingsData.geminiApiKey && settingsData.geminiApiKey.trim()) {
-              apiKey = settingsData.geminiApiKey.trim();
-              console.log("Found shared custom Gemini API Key in workspace settings document. Utilizing for call audit.");
+      let apiKey = clientApiKey && typeof clientApiKey === 'string' && clientApiKey.trim() ? clientApiKey.trim() : null;
+      
+      if (!apiKey) {
+        try {
+          const configPath = path.join(process.cwd(), "firebase-applet-config.json");
+          if (fs.existsSync(configPath)) {
+            const firebaseConfig = JSON.parse(fs.readFileSync(configPath, "utf8"));
+            const { initializeApp: serverInitApp } = await import("firebase/app");
+            const { getFirestore: serverGetFirestore, doc: serverDoc, getDoc: serverGetDoc } = await import("firebase/firestore");
+            
+            const appInstance = serverInitApp(firebaseConfig);
+            const firestoredb = serverGetFirestore(appInstance, firebaseConfig.firestoreDatabaseId);
+            
+            const timeoutPromise = new Promise<null>((_, reject) => 
+              setTimeout(() => reject(new Error("Firestore lookup timed out")), 2000)
+            );
+            
+            const getDocWithTimeout = async () => {
+              return await serverGetDoc(serverDoc(firestoredb, "settings", "workspace"));
+            };
+            
+            const settingsSnap = await Promise.race([getDocWithTimeout(), timeoutPromise]) as any;
+            
+            if (settingsSnap && settingsSnap.exists()) {
+              const settingsData = settingsSnap.data();
+              if (settingsData && settingsData.geminiApiKey && settingsData.geminiApiKey.trim()) {
+                apiKey = settingsData.geminiApiKey.trim();
+                console.log("Found shared custom Gemini API Key in workspace settings document. Utilizing for call audit.");
+              }
             }
           }
+        } catch (dbError) {
+          console.warn("Could not query settings workspace document for custom API key. Defaulting to server env keys.", dbError);
         }
-      } catch (dbError) {
-        console.warn("Could not query settings workspace document for custom API key. Defaulting to server env keys.", dbError);
       }
 
       if (!apiKey) {
@@ -58,7 +70,8 @@ async function startServer() {
         });
       }
 
-      console.log(`Instructing Gemini to analyze call with mimeType: ${mimeType}`);
+      let chosenModel = clientModel && typeof clientModel === 'string' && clientModel.trim() ? clientModel.trim() : 'gemini-2.5-flash';
+      console.log(`Instructing Gemini to analyze call with model: ${chosenModel}, mimeType: ${mimeType}`);
 
       const ai = new GoogleGenAI({
         apiKey: apiKey,
@@ -70,7 +83,7 @@ async function startServer() {
       });
 
       const response = await ai.models.generateContent({
-        model: 'gemini-3.5-flash',
+        model: chosenModel,
         contents: [
           {
             inlineData: {
