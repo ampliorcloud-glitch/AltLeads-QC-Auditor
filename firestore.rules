@@ -72,6 +72,10 @@ service cloud.firestore {
       return request.resource.data.keys().hasOnly(fields);
     }
 
+    function isNumeric(val) {
+      return val is int || val is float;
+    }
+
     // ===============================================================
     // Domain Validators
     // ===============================================================
@@ -104,21 +108,21 @@ service cloud.firestore {
              data.projectId == projectId &&
              data.questionText is string && data.questionText.size() > 0 && data.questionText.size() < 500 &&
              data.isRequired is bool &&
-             (!('weight' in data) || data.weight is number);
+             (!('weight' in data) || isNumeric(data.weight));
     }
 
     function isValidCallAudit(data) {
       return hasOnlyAllowedFields(['id', 'filename', 'status', 'timestamp', 'overallScore', 'scores', 'summary', 'feedback', 'transcript', 'audioUrl', 'errorMsg']) &&
              data.filename is string && data.filename.size() > 0 &&
              data.status in ['pending', 'processing', 'completed', 'error'] &&
-             data.timestamp is number;
+             isNumeric(data.timestamp);
     }
 
     function isValidSettings(data) {
       return hasOnlyAllowedFields(['companyName', 'companyOffering', 'slaThreshold', 'enableRoleResolution', 'modelTier', 'scoringWeights', 'geminiApiKey', 'updatedAt']) &&
              data.companyName is string && data.companyName.size() > 0 &&
              data.companyOffering is string &&
-             data.slaThreshold is number &&
+             isNumeric(data.slaThreshold) &&
              data.enableRoleResolution is bool &&
              data.modelTier is string;
     }

@@ -25,7 +25,7 @@ const DEFAULT_SETTINGS: FirestoreSettingsData = {
   slaThreshold: 7.0,
   enableRoleResolution: true,
   modelTier: 'standard',
-  customModel: 'gemini-3.5-flash',
+  customModel: 'gemini-2.5-flash',
   scoringWeights: {
     greeting: 20,
     discovery: 20,
@@ -57,6 +57,11 @@ export default function Settings() {
         const fetched = await getWorkspaceSettings();
         if (fetched) {
           setSettings(fetched);
+          try {
+            localStorage.setItem('auditSettings', JSON.stringify(fetched));
+          } catch (e) {
+            console.error('Failed to sync settings to local storage', e);
+          }
         }
       } catch (err) {
         console.error('Failed to load shared workspace settings:', err);
@@ -70,6 +75,11 @@ export default function Settings() {
     try {
       setSaveError(null);
       await saveWorkspaceSettings(settings);
+      try {
+        localStorage.setItem('auditSettings', JSON.stringify(settings));
+      } catch (e) {
+        console.error('Failed to save settings local cache backup', e);
+      }
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 3000);
     } catch (err: any) {
@@ -201,20 +211,21 @@ export default function Settings() {
                   <div>
                     <label className="block text-sm font-bold text-black font-display mb-1.5 font-sans">Acoustic Audit Model Select</label>
                     <select
-                      value={['gemini-3.5-flash', 'gemini-3.1-pro-preview', 'gemini-3.1-flash-lite'].includes(settings.customModel || '') ? settings.customModel : 'custom'}
+                      value={['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-2.5-pro'].includes(settings.customModel || '') ? settings.customModel : 'custom'}
                       onChange={(e) => {
                         const val = e.target.value;
                         if (val === 'custom') {
-                          setSettings(prev => ({ ...prev, customModel: prev.customModel || 'gemini-3.5-flash' }));
+                          setSettings(prev => ({ ...prev, customModel: prev.customModel || 'gemini-2.5-flash' }));
                         } else {
                           setSettings(prev => ({ ...prev, customModel: val }));
                         }
                       }}
                       className="w-full bg-white border border-[#E5E7EB] rounded-xl px-4 py-3 text-sm font-medium focus:outline-none focus:ring-1 focus:ring-black text-black"
                     >
-                      <option value="gemini-3.5-flash">Gemini 3.5 Flash (Default - Recommended speed & quality)</option>
-                      <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro (Heavyweight reasoning & deep quality)</option>
-                      <option value="gemini-3.1-flash-lite">Gemini 3.1 Flash Lite (Ultra low-latency cost optimized)</option>
+                      <option value="gemini-2.5-flash">Gemini 2.5 Flash (Default - Stable, high-speed, and accurate)</option>
+                      <option value="gemini-2.0-flash">Gemini 2.0 Flash (Low latency with rich media capabilities)</option>
+                      <option value="gemini-1.5-flash">Gemini 1.5 Flash (Standard legacy model, robust universal key support)</option>
+                      <option value="gemini-2.5-pro">Gemini 2.5 Pro (Heavyweight reasoning, highly detailed audits)</option>
                       <option value="custom">Custom Model Identifier...</option>
                     </select>
                     <p className="text-xs text-[#6B7280] mt-1.5 font-medium">Select a specific cognitive model. Overrides default server parameters.</p>
@@ -232,13 +243,13 @@ export default function Settings() {
                       className="w-full bg-white border border-[#E5E7EB] rounded-xl px-4 py-3 text-sm font-medium focus:outline-none focus:ring-1 focus:ring-black text-black font-mono shadow-sm"
                     />
                     <p className="text-xs text-[#6B7280] mt-1.5 font-medium leading-relaxed">
-                      This key is cached in your browser. Leaving it empty uses default workspace secrets.
+                      This key is cached in your browser. Leaving it empty uses your server's primary <code>GEMINI_API_KEY</code> environment variable.
                     </p>
                   </div>
                 </div>
 
                 {/* If Custom Model option is active, show the nested text-input */}
-                {!['gemini-3.5-flash', 'gemini-3.1-pro-preview', 'gemini-3.1-flash-lite'].includes(settings.customModel || '') && (
+                {!['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-2.5-pro'].includes(settings.customModel || '') && (
                   <div className="pt-2 animate-fade-in">
                     <label className="block text-sm font-bold text-black font-display mb-1.5">Custom Model Identifier String</label>
                     <input 

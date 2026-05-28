@@ -9,8 +9,8 @@ const app = initializeApp(firebaseConfig);
 
 // Initialize Firebase services
 // Initialize standard default database if database ID is empty or not provided
-export const db = firebaseConfig.firestoreDatabaseId && firebaseConfig.firestoreDatabaseId !== 'alqc'
-  ? getFirestore(app, firebaseConfig.firestoreDatabaseId)
+export const db = firebaseConfig.firestoreDatabaseId && firebaseConfig.firestoreDatabaseId.trim() !== ""
+  ? getFirestore(app, firebaseConfig.firestoreDatabaseId.trim())
   : getFirestore(app);
 export const auth = getAuth(app);
 export const storage = getStorage(app);

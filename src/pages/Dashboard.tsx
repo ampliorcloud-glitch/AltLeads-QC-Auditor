@@ -211,13 +211,27 @@ export default function Dashboard() {
     try {
       const base64Data = await fileToBase64(file);
       
-      let mimeType = file.type;
-      if (!mimeType) {
-        if (file.name.toLowerCase().endsWith('.aac')) {
-          mimeType = 'audio/aac';
-        } else {
-          mimeType = 'audio/mpeg';
-        }
+      let mimeType = file.type || '';
+      const lowerMime = mimeType.toLowerCase();
+      const lowerName = file.name.toLowerCase();
+
+      // Standardize to Gemini-supported mime types
+      if (lowerMime.includes('aac') || lowerMime.includes('adts') || lowerName.endsWith('.aac')) {
+        mimeType = 'audio/aac';
+      } else if (lowerMime.includes('wav') || lowerName.endsWith('.wav')) {
+        mimeType = 'audio/wav';
+      } else if (lowerMime.includes('m4a') || lowerMime.includes('x-m4a') || lowerName.endsWith('.m4a')) {
+        mimeType = 'audio/x-m4a';
+      } else if (lowerMime.includes('ogg') || lowerName.endsWith('.ogg')) {
+        mimeType = 'audio/ogg';
+      } else if (lowerMime.includes('webm') || lowerMime.includes('weba') || lowerName.endsWith('.webm') || lowerName.endsWith('.weba')) {
+        mimeType = 'audio/webm';
+      } else if (lowerMime.includes('mp3') || lowerMime.includes('mpeg') || lowerName.endsWith('.mp3')) {
+        mimeType = 'audio/mp3';
+      } else if (lowerMime.includes('flac') || lowerName.endsWith('.flac')) {
+        mimeType = 'audio/flac';
+      } else if (!mimeType) {
+        mimeType = 'audio/mpeg';
       }
 
       // Check for saved local settings custom API key and custom model selection
@@ -278,15 +292,7 @@ export default function Dashboard() {
           } catch (e) {}
         }
 
-        if (!apiKeyToUse) {
-          try {
-            const envKey2 = process.env.API_KEY;
-            if (envKey2 && envKey2 !== 'undefined' && envKey2.trim()) {
-              apiKeyToUse = envKey2.trim();
-            }
-          } catch (e) {}
-        }
-        
+
         if (!apiKeyToUse) {
           try {
             if (typeof import.meta !== 'undefined' && import.meta.env) {
@@ -302,68 +308,144 @@ export default function Dashboard() {
           throw new Error("No Gemini API key found. If you are in a client-only hosting environment, go to Settings (bottom-left gear icon) to save your personal Gemini API key.");
         }
 
-        const chosenModel = selectedModel || 'gemini-3.5-flash';
+        const chosenModel = selectedModel || 'gemini-2.5-flash';
         console.log(`Instructing Gemini directly from browser with model: ${chosenModel}, mimeType: ${mimeType}`);
 
         const ai = new GoogleGenAI({
           apiKey: apiKeyToUse,
         });
 
-        const geminiResponse = await ai.models.generateContent({
-          model: chosenModel,
-          contents: [
-            {
-              inlineData: {
-                mimeType: mimeType,
-                data: base64Data
-              }
-            },
-            {
-              text: `You are an expert sales manager auditing a lead generation call. 
-              1. Transcribe the audio exactly, identifying two speakers: the 'Agent' and the 'Prospect'. Identify their roles based on who is greeting/selling (Agent) and who is responding (Prospect).
-              2. Score the agent's performance from 1 to 10 on: greeting, discovery, valueProp, objectionHandling, and closing.
-              3. Provide an executive summary written from the Agent's (caller's) perspective. It must be a concise narrative detailing: who I connected with, services/trainings discussed, their interest/needs, confirmation of key probing questions asked, stated next steps, and any important information for my senior.
-              4. Provide 3 actionable feedback points for improvement.
-              Return the response in valid JSON format.`
-            }
-          ],
-          config: {
-            responseMimeType: "application/json",
-            responseSchema: {
-              type: Type.OBJECT,
-              properties: {
-                transcript: {
-                  type: Type.ARRAY,
-                  items: {
-                    type: Type.OBJECT,
-                    properties: {
-                      speaker: { type: Type.STRING, enum: ['Agent', 'Prospect'] },
-                      text: { type: Type.STRING }
-                    },
-                    required: ['speaker', 'text']
-                  }
-                },
-                scores: {
-                  type: Type.OBJECT,
-                  properties: {
-                    greeting: { type: Type.NUMBER },
-                    discovery: { type: Type.NUMBER },
-                    valueProp: { type: Type.NUMBER },
-                    objectionHandling: { type: Type.NUMBER },
-                    closing: { type: Type.NUMBER }
-                  },
-                  required: ['greeting', 'discovery', 'valueProp', 'objectionHandling', 'closing']
-                },
-                summary: { type: Type.STRING },
-                feedback: {
-                  type: Type.ARRAY,
-                  items: { type: Type.STRING }
+        let geminiResponse;
+        try {
+          geminiResponse = await ai.models.generateContent({
+            model: chosenModel,
+            contents: [
+              {
+                inlineData: {
+                  mimeType: mimeType,
+                  data: base64Data
                 }
               },
-              required: ['transcript', 'scores', 'summary', 'feedback']
+              {
+                text: `You are an expert sales manager auditing a lead generation call. 
+                1. Transcribe the audio exactly, identifying two speakers: the 'Agent' and the 'Prospect'. Identify their roles based on who is greeting/selling (Agent) and who is responding (Prospect).
+                2. Score the agent's performance from 1 to 10 on: greeting, discovery, valueProp, objectionHandling, and closing.
+                3. Provide an executive summary written from the Agent's (caller's) perspective. It must be a concise narrative detailing: who I connected with, services/trainings discussed, their interest/needs, confirmation of key probing questions asked, stated next steps, and any important information for my senior.
+                4. Provide 3 actionable feedback points for improvement.
+                Return the response in valid JSON format.`
+              }
+            ],
+            config: {
+              responseMimeType: "application/json",
+              responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                  transcript: {
+                    type: Type.ARRAY,
+                    items: {
+                      type: Type.OBJECT,
+                      properties: {
+                        speaker: { type: Type.STRING, enum: ['Agent', 'Prospect'] },
+                        text: { type: Type.STRING }
+                      },
+                      required: ['speaker', 'text']
+                    }
+                  },
+                  scores: {
+                    type: Type.OBJECT,
+                    properties: {
+                      greeting: { type: Type.NUMBER },
+                      discovery: { type: Type.NUMBER },
+                      valueProp: { type: Type.NUMBER },
+                      objectionHandling: { type: Type.NUMBER },
+                      closing: { type: Type.NUMBER }
+                    },
+                    required: ['greeting', 'discovery', 'valueProp', 'objectionHandling', 'closing']
+                  },
+                  summary: { type: Type.STRING },
+                  feedback: {
+                    type: Type.ARRAY,
+                    items: { type: Type.STRING }
+                  }
+                },
+                required: ['transcript', 'scores', 'summary', 'feedback']
+              }
             }
+          });
+        } catch (err: any) {
+          const errMsg = (err?.message || '').toLowerCase();
+          const errStr = JSON.stringify(err).toLowerCase();
+          const isPermissionOrAccessDenied = 
+            errMsg.includes('403') || 
+            errMsg.includes('permission_denied') || 
+            errMsg.includes('denied access') || 
+            errMsg.includes('not found') ||
+            errStr.includes('403') || 
+            errStr.includes('permission_denied') || 
+            errStr.includes('denied_access') ||
+            errStr.includes('not_found');
+
+          if (isPermissionOrAccessDenied && chosenModel !== 'gemini-1.5-flash') {
+            console.warn(`Direct model ${chosenModel} returned access denied or forbidden. Retrying automatically with robust 'gemini-1.5-flash'...`);
+            geminiResponse = await ai.models.generateContent({
+              model: 'gemini-1.5-flash',
+              contents: [
+                {
+                  inlineData: {
+                    mimeType: mimeType,
+                    data: base64Data
+                  }
+                },
+                {
+                  text: `You are an expert sales manager auditing a lead generation call. 
+                  1. Transcribe the audio exactly, identifying two speakers: the 'Agent' and the 'Prospect'. Identify their roles based on who is greeting/selling (Agent) and who is responding (Prospect).
+                  2. Score the agent's performance from 1 to 10 on: greeting, discovery, valueProp, objectionHandling, and closing.
+                  3. Provide an executive summary written from the Agent's (caller's) perspective. It must be a concise narrative detailing: who I connected with, services/trainings discussed, their interest/needs, confirmation of key probing questions asked, stated next steps, and any important information for my senior.
+                  4. Provide 3 actionable feedback points for improvement.
+                  Return the response in valid JSON format.`
+                }
+              ],
+              config: {
+                responseMimeType: "application/json",
+                responseSchema: {
+                  type: Type.OBJECT,
+                  properties: {
+                    transcript: {
+                      type: Type.ARRAY,
+                      items: {
+                        type: Type.OBJECT,
+                        properties: {
+                          speaker: { type: Type.STRING, enum: ['Agent', 'Prospect'] },
+                          text: { type: Type.STRING }
+                        },
+                        required: ['speaker', 'text']
+                      }
+                    },
+                    scores: {
+                      type: Type.OBJECT,
+                      properties: {
+                        greeting: { type: Type.NUMBER },
+                        discovery: { type: Type.NUMBER },
+                        valueProp: { type: Type.NUMBER },
+                        objectionHandling: { type: Type.NUMBER },
+                        closing: { type: Type.NUMBER }
+                      },
+                      required: ['greeting', 'discovery', 'valueProp', 'objectionHandling', 'closing']
+                    },
+                    summary: { type: Type.STRING },
+                    feedback: {
+                      type: Type.ARRAY,
+                      items: { type: Type.STRING }
+                    }
+                  },
+                  required: ['transcript', 'scores', 'summary', 'feedback']
+                }
+              }
+            });
+          } else {
+            throw err;
           }
-        });
+        }
 
         if (!geminiResponse.text) {
           throw new Error("Direct Gemini API returned an empty response.");
@@ -394,8 +476,16 @@ export default function Dashboard() {
   };
 
   const handleFiles = async (files: FileList | File[]) => {
-    const audioFiles = Array.from(files).filter((file: File) => file.type.startsWith('audio/') || file.name.toLowerCase().endsWith('.aac'));
-    if (audioFiles.length === 0) return;
+    const audioFiles = Array.from(files).filter((file: File) => {
+      const type = file.type.toLowerCase();
+      const name = file.name.toLowerCase();
+      const validExtensions = ['.mp3', '.wav', '.m4a', '.aac', '.ogg', '.weba', '.webm', '.flac', '.amr', '.opus', '.caf', '.mp4'];
+      return type.startsWith('audio/') || validExtensions.some(ext => name.endsWith(ext));
+    });
+    if (audioFiles.length === 0) {
+      alert("Please select a valid audio file (.mp3, .wav, .m4a, .aac, .ogg, etc.)");
+      return;
+    }
 
     for (const file of audioFiles) {
       const id = 'audit_' + Math.random().toString(36).substring(7) + '_' + Date.now();
@@ -601,7 +691,7 @@ export default function Dashboard() {
                             if (parsed && parsed.customModel) return parsed.customModel;
                           }
                         } catch (e) {}
-                        return 'gemini-3.5-flash';
+                        return 'gemini-2.5-flash';
                       })()}...</p>
                     </div>
                   ) : activeSelectedAudit.status === 'completed' ? (

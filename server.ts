@@ -25,6 +25,16 @@ async function startServer() {
 
       let apiKey = clientApiKey && typeof clientApiKey === 'string' && clientApiKey.trim() ? clientApiKey.trim() : null;
       
+      // 1. Try server environment variable GEMINI_API_KEY (highest priority on Hostinger/local server configurations)
+      if (!apiKey) {
+        const envKey = process.env.GEMINI_API_KEY;
+        if (envKey && envKey !== 'undefined' && envKey.trim()) {
+          apiKey = envKey.trim();
+          console.log("Successfully picked up GEMINI_API_KEY from server environment variables / .env.");
+        }
+      }
+
+      // 2. Fall back to shared Firestore settings document if NO server environment key is defined
       if (!apiKey) {
         try {
           const configPath = path.join(process.cwd(), "firebase-applet-config.json");
@@ -50,17 +60,13 @@ async function startServer() {
               const settingsData = settingsSnap.data();
               if (settingsData && settingsData.geminiApiKey && settingsData.geminiApiKey.trim()) {
                 apiKey = settingsData.geminiApiKey.trim();
-                console.log("Found shared custom Gemini API Key in workspace settings document. Utilizing for call audit.");
+                console.log("No server environment key found. Falling back to the custom Gemini API Key stored in workspace Firestore document.");
               }
             }
           }
         } catch (dbError) {
-          console.warn("Could not query settings workspace document for custom API key. Defaulting to server env keys.", dbError);
+          console.warn("Could not query settings workspace document for custom API key fallback.", dbError);
         }
-      }
-
-      if (!apiKey) {
-        apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
       }
 
       if (!apiKey) {
@@ -70,7 +76,7 @@ async function startServer() {
         });
       }
 
-      let chosenModel = clientModel && typeof clientModel === 'string' && clientModel.trim() ? clientModel.trim() : 'gemini-3.5-flash';
+      let chosenModel = clientModel && typeof clientModel === 'string' && clientModel.trim() ? clientModel.trim() : 'gemini-2.5-flash';
       console.log(`Instructing Gemini to analyze call with model: ${chosenModel}, mimeType: ${mimeType}`);
 
       const ai = new GoogleGenAI({
@@ -147,13 +153,28 @@ async function startServer() {
 
     } catch (error: any) {
       console.error("Gemini API call or parsing failed:", error);
+      
+      let errorDetails = "";
+      if (error && typeof error === 'object') {
+        try {
+          if (error.status) {
+            errorDetails += ` [HTTP Status: ${error.status}]`;
+          }
+          if (error.errorDetails) {
+            errorDetails += ` [Details: ${typeof error.errorDetails === 'object' ? JSON.stringify(error.errorDetails) : error.errorDetails}]`;
+          }
+        } catch (_) {}
+      }
+
+      const helpfulMsg = `${error.message || "An unexpected error occurred during audio file analysis."}${errorDetails}`;
+
       try {
-        fs.writeFileSync(path.join(process.cwd(), "api_error.log"), `${new Date().toISOString()} - ${error.stack || error.message || error}\n`, "utf8");
+        fs.writeFileSync(path.join(process.cwd(), "api_error.log"), `${new Date().toISOString()} - ${error.stack || helpfulMsg}\n`, "utf8");
       } catch (err) {
         console.error("Failed to write to api_error.log", err);
       }
       return res.status(500).json({ 
-        error: error.message || "An unexpected error occurred while analyzing the audio file." 
+        error: helpfulMsg
       });
     }
   });

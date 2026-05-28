@@ -5,7 +5,7 @@ import tailwindcss from '@tailwindcss/vite';
 
 export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, '.', '');
-    const geminiKey = env.GEMINI_API_KEY || process.env.GEMINI_API_KEY || process.env.API_KEY || '';
+    const geminiKey = env.GEMINI_API_KEY || process.env.GEMINI_API_KEY || env.VITE_GEMINI_API_KEY || '';
     return {
       server: {
         port: 3000,
@@ -35,7 +35,7 @@ export default defineConfig(({ mode }) => {
 
                   let apiKey = clientApiKey && typeof clientApiKey === 'string' && clientApiKey.trim() ? clientApiKey.trim() : null;
                   if (!apiKey) {
-                    apiKey = env.GEMINI_API_KEY || process.env.GEMINI_API_KEY || process.env.API_KEY;
+                    apiKey = env.GEMINI_API_KEY || process.env.GEMINI_API_KEY || env.VITE_GEMINI_API_KEY;
                   }
 
                   if (!apiKey) {
@@ -46,7 +46,7 @@ export default defineConfig(({ mode }) => {
 
                   const { GoogleGenAI, Type } = await import('@google/genai');
                   const ai = new GoogleGenAI({ apiKey });
-                  const chosenModel = clientModel || 'gemini-3.5-flash';
+                  const chosenModel = clientModel || 'gemini-2.5-flash';
 
                   const response = await ai.models.generateContent({
                     model: chosenModel,

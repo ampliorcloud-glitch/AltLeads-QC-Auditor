@@ -3,7 +3,7 @@
   "appId": "1:308314268907:web:a2ae186d4603ded5694aae",
   "apiKey": "AIzaSyD0EAOWs8nqq4DQ6xVj4sAbethkgBtzBcQ",
   "authDomain": "altleads-prospect-finder.firebaseapp.com",
-  "firestoreDatabaseId": "",
+  "firestoreDatabaseId": "alqc",
   "storageBucket": "altleads-prospect-finder.firebasestorage.app",
   "messagingSenderId": "308314268907",
   "measurementId": ""
