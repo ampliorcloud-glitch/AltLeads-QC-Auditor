@@ -46,7 +46,13 @@ export default defineConfig(({ mode }) => {
 
                   const { GoogleGenAI, Type } = await import('@google/genai');
                   const ai = new GoogleGenAI({ apiKey });
-                  const chosenModel = clientModel || 'gemini-2.5-flash';
+                  let chosenModel = clientModel || 'gemini-3.5-flash';
+
+                  const prohibitedModels = ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-pro', 'gemini-2.0-flash', 'gemini-2.0-pro', 'gemini-2.0-flash-thinking'];
+                  if (prohibitedModels.includes(chosenModel) || chosenModel.startsWith('gemini-1.5') || chosenModel.startsWith('gemini-2.0')) {
+                    console.warn(`Upgrading deprecated development model request '${chosenModel}' to recommended 'gemini-3.5-flash'`);
+                    chosenModel = 'gemini-3.5-flash';
+                  }
 
                   const response = await ai.models.generateContent({
                     model: chosenModel,

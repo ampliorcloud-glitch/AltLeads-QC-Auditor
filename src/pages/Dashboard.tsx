@@ -308,7 +308,12 @@ export default function Dashboard() {
           throw new Error("No Gemini API key found. If you are in a client-only hosting environment, go to Settings (bottom-left gear icon) to save your personal Gemini API key.");
         }
 
-        const chosenModel = selectedModel || 'gemini-2.5-flash';
+        let chosenModel = selectedModel || 'gemini-3.5-flash';
+        const prohibitedModels = ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-pro', 'gemini-2.0-flash', 'gemini-2.0-pro', 'gemini-2.0-flash-thinking'];
+        if (prohibitedModels.includes(chosenModel) || chosenModel.startsWith('gemini-1.5') || chosenModel.startsWith('gemini-2.0')) {
+          console.warn(`Upgrading deprecated browser model request '${chosenModel}' to recommended 'gemini-3.5-flash'`);
+          chosenModel = 'gemini-3.5-flash';
+        }
         console.log(`Instructing Gemini directly from browser with model: ${chosenModel}, mimeType: ${mimeType}`);
 
         const ai = new GoogleGenAI({
@@ -385,10 +390,10 @@ export default function Dashboard() {
             errStr.includes('denied_access') ||
             errStr.includes('not_found');
 
-          if (isPermissionOrAccessDenied && chosenModel !== 'gemini-1.5-flash') {
-            console.warn(`Direct model ${chosenModel} returned access denied or forbidden. Retrying automatically with robust 'gemini-1.5-flash'...`);
+          if (isPermissionOrAccessDenied && chosenModel !== 'gemini-3.5-flash') {
+            console.warn(`Direct model ${chosenModel} returned access denied or forbidden. Retrying automatically with robust 'gemini-3.5-flash'...`);
             geminiResponse = await ai.models.generateContent({
-              model: 'gemini-1.5-flash',
+              model: 'gemini-3.5-flash',
               contents: [
                 {
                   inlineData: {

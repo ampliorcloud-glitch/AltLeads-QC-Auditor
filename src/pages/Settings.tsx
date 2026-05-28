@@ -25,7 +25,7 @@ const DEFAULT_SETTINGS: FirestoreSettingsData = {
   slaThreshold: 7.0,
   enableRoleResolution: true,
   modelTier: 'standard',
-  customModel: 'gemini-2.5-flash',
+  customModel: 'gemini-3.5-flash',
   scoringWeights: {
     greeting: 20,
     discovery: 20,
@@ -40,7 +40,12 @@ export default function Settings() {
     const saved = localStorage.getItem('auditSettings');
     if (saved) {
       try {
-        return { ...DEFAULT_SETTINGS, ...JSON.parse(saved) };
+        const parsed = JSON.parse(saved);
+        const prohibited = ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-pro', 'gemini-2.0-flash', 'gemini-2.0-pro', 'gemini-2.0-flash-thinking'];
+        if (parsed && parsed.customModel && (prohibited.includes(parsed.customModel) || parsed.customModel.startsWith('gemini-1.5') || parsed.customModel.startsWith('gemini-2.0'))) {
+          parsed.customModel = 'gemini-3.5-flash';
+        }
+        return { ...DEFAULT_SETTINGS, ...parsed };
       } catch (e) {
         console.error('Failed to parse cached settings local backup', e);
       }
@@ -56,6 +61,10 @@ export default function Settings() {
       try {
         const fetched = await getWorkspaceSettings();
         if (fetched) {
+          const prohibited = ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-pro', 'gemini-2.0-flash', 'gemini-2.0-pro', 'gemini-2.0-flash-thinking'];
+          if (fetched.customModel && (prohibited.includes(fetched.customModel) || fetched.customModel.startsWith('gemini-1.5') || fetched.customModel.startsWith('gemini-2.0'))) {
+            fetched.customModel = 'gemini-3.5-flash';
+          }
           setSettings(fetched);
           try {
             localStorage.setItem('auditSettings', JSON.stringify(fetched));
@@ -211,21 +220,23 @@ export default function Settings() {
                   <div>
                     <label className="block text-sm font-bold text-black font-display mb-1.5 font-sans">Acoustic Audit Model Select</label>
                     <select
-                      value={['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-2.5-pro'].includes(settings.customModel || '') ? settings.customModel : 'custom'}
+                      value={['gemini-3.5-flash', 'gemini-3.1-flash-lite', 'gemini-3-flash-preview', 'gemini-3.1-pro-preview', 'gemini-2.5-flash', 'gemini-2.5-pro'].includes(settings.customModel || '') ? settings.customModel : 'custom'}
                       onChange={(e) => {
                         const val = e.target.value;
                         if (val === 'custom') {
-                          setSettings(prev => ({ ...prev, customModel: prev.customModel || 'gemini-2.5-flash' }));
+                          setSettings(prev => ({ ...prev, customModel: prev.customModel || 'gemini-3.5-flash' }));
                         } else {
                           setSettings(prev => ({ ...prev, customModel: val }));
                         }
                       }}
                       className="w-full bg-white border border-[#E5E7EB] rounded-xl px-4 py-3 text-sm font-medium focus:outline-none focus:ring-1 focus:ring-black text-black"
                     >
-                      <option value="gemini-2.5-flash">Gemini 2.5 Flash (Default - Stable, high-speed, and accurate)</option>
-                      <option value="gemini-2.0-flash">Gemini 2.0 Flash (Low latency with rich media capabilities)</option>
-                      <option value="gemini-1.5-flash">Gemini 1.5 Flash (Standard legacy model, robust universal key support)</option>
-                      <option value="gemini-2.5-pro">Gemini 2.5 Pro (Heavyweight reasoning, highly detailed audits)</option>
+                      <option value="gemini-3.5-flash">Gemini 3.5 Flash (Recommended - Fastest and highly accurate reasoning)</option>
+                      <option value="gemini-3.1-flash-lite">Gemini 3.1 Flash Lite (High-speed, optimized resource footprints)</option>
+                      <option value="gemini-3-flash-preview">Gemini 3 Flash Preview (Developer evaluation preset)</option>
+                      <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro Preview (Advanced, highly detailed multimodal analytical audits)</option>
+                      <option value="gemini-2.5-flash">Gemini 2.5 Flash (Balanced general capability)</option>
+                      <option value="gemini-2.5-pro">Gemini 2.5 Pro (Heavyweight reasoning, detailed legacy audits)</option>
                       <option value="custom">Custom Model Identifier...</option>
                     </select>
                     <p className="text-xs text-[#6B7280] mt-1.5 font-medium">Select a specific cognitive model. Overrides default server parameters.</p>
@@ -249,7 +260,7 @@ export default function Settings() {
                 </div>
 
                 {/* If Custom Model option is active, show the nested text-input */}
-                {!['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-2.5-pro'].includes(settings.customModel || '') && (
+                {!['gemini-3.5-flash', 'gemini-3.1-flash-lite', 'gemini-3-flash-preview', 'gemini-3.1-pro-preview', 'gemini-2.5-flash', 'gemini-2.5-pro'].includes(settings.customModel || '') && (
                   <div className="pt-2 animate-fade-in">
                     <label className="block text-sm font-bold text-black font-display mb-1.5">Custom Model Identifier String</label>
                     <input 

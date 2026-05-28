@@ -76,7 +76,14 @@ async function startServer() {
         });
       }
 
-      let chosenModel = clientModel && typeof clientModel === 'string' && clientModel.trim() ? clientModel.trim() : 'gemini-2.5-flash';
+      let chosenModel = clientModel && typeof clientModel === 'string' && clientModel.trim() ? clientModel.trim() : 'gemini-3.5-flash';
+      
+      const prohibitedModels = ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-pro', 'gemini-2.0-flash', 'gemini-2.0-pro', 'gemini-2.0-flash-thinking'];
+      if (prohibitedModels.includes(chosenModel) || chosenModel.startsWith('gemini-1.5') || chosenModel.startsWith('gemini-2.0')) {
+        console.warn(`Upgrading deprecated model request '${chosenModel}' to recommended 'gemini-3.5-flash'`);
+        chosenModel = 'gemini-3.5-flash';
+      }
+
       console.log(`Instructing Gemini to analyze call with model: ${chosenModel}, mimeType: ${mimeType}`);
 
       const ai = new GoogleGenAI({
