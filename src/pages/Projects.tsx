@@ -1,6 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { collection, getDocs, doc, updateDoc, deleteDoc, setDoc, query, orderBy } from 'firebase/firestore';
-import { db } from '../lib/firebase';
 import { 
   FolderKanban, 
   Search, 
@@ -93,21 +91,20 @@ export default function Projects() {
   const fetchProjects = async () => {
     try {
       setLoading(true);
-      const q = query(collection(db, 'projects'), orderBy('name'));
-      const querySnapshot = await getDocs(q);
-      const projectsData: ProjectData[] = [];
-      querySnapshot.forEach((doc) => {
-        projectsData.push({ id: doc.id, ...doc.data() } as ProjectData);
-      });
-      
-      if (projectsData.length === 0) {
-        setProjects(SAMPLE_PROJECTS);
+      const savedProjs = localStorage.getItem('local_projects');
+      if (savedProjs) {
+        try {
+          setProjects(JSON.parse(savedProjs));
+        } catch (e) {
+          setProjects(SAMPLE_PROJECTS);
+        }
       } else {
-        setProjects(projectsData);
+        setProjects(SAMPLE_PROJECTS);
+        localStorage.setItem('local_projects', JSON.stringify(SAMPLE_PROJECTS));
       }
     } catch (error) {
       console.error("Error fetching projects:", error);
-      setProjects(SAMPLE_PROJECTS); // Fallback to sample data on error
+      setProjects(SAMPLE_PROJECTS);
     } finally {
       setLoading(false);
     }
@@ -116,25 +113,22 @@ export default function Projects() {
   const fetchQuestions = async (projectId: string) => {
     try {
       setQuestionsLoading(true);
-      const q = query(collection(db, `projects/${projectId}/probing_questions`));
-      const querySnapshot = await getDocs(q);
-      const questionsData: ProbingQuestion[] = [];
-      querySnapshot.forEach((doc) => {
-        questionsData.push({ id: doc.id, ...doc.data() } as ProbingQuestion);
-      });
-      
-      if (questionsData.length === 0 && SAMPLE_QUESTIONS[projectId]) {
-        setQuestions(SAMPLE_QUESTIONS[projectId]);
+      const savedQs = localStorage.getItem('local_questions');
+      let allQuestions: Record<string, ProbingQuestion[]> = {};
+      if (savedQs) {
+        try {
+          allQuestions = JSON.parse(savedQs);
+        } catch (e) {}
       } else {
-        setQuestions(questionsData);
+        allQuestions = SAMPLE_QUESTIONS;
+        localStorage.setItem('local_questions', JSON.stringify(SAMPLE_QUESTIONS));
       }
+
+      const projQuestions = allQuestions[projectId] || [];
+      setQuestions(projQuestions);
     } catch (error) {
       console.error("Error fetching questions:", error);
-      if (SAMPLE_QUESTIONS[projectId]) {
-        setQuestions(SAMPLE_QUESTIONS[projectId]); // Fallback to sample data on error
-      } else {
-        setQuestions([]);
-      }
+      setQuestions([]);
     } finally {
       setQuestionsLoading(false);
     }
@@ -179,23 +173,12 @@ export default function Projects() {
     e.preventDefault();
     try {
       if (editingProject) {
-        try {
-          if (!editingProject.id.startsWith('proj_sample_')) {
-            const projectRef = doc(db, 'projects', editingProject.id);
-            await updateDoc(projectRef, {
-              name: projectFormData.name,
-              description: projectFormData.description,
-              status: projectFormData.status
-            });
-          }
-        } catch (error) {
-          console.warn("Firestore error, updating local state only", error);
-        }
-        
         const updatedProjects = projects.map(p => 
           p.id === editingProject.id ? { ...p, ...projectFormData } as ProjectData : p
         );
         setProjects(updatedProjects);
+        localStorage.setItem('local_projects', JSON.stringify(updatedProjects));
+        
         if (selectedProject?.id === editingProject.id) {
           setSelectedProject({ ...selectedProject, ...projectFormData } as ProjectData);
         }
@@ -209,18 +192,9 @@ export default function Projects() {
           createdAt: new Date()
         } as ProjectData;
         
-        try {
-          await setDoc(doc(db, 'projects', newId), {
-            name: projectFormData.name,
-            description: projectFormData.description,
-            status: projectFormData.status,
-            createdAt: new Date()
-          });
-        } catch (error) {
-          console.warn("Firestore error, adding to local state only", error);
-        }
-        
-        setProjects([...projects, newProject]);
+        const updatedProjects = [...projects, newProject];
+        setProjects(updatedProjects);
+        localStorage.setItem('local_projects', JSON.stringify(updatedProjects));
       }
       handleCloseProjectModal();
     } catch (error) {
@@ -229,17 +203,22 @@ export default function Projects() {
   };
 
   const handleDeleteProject = async (id: string) => {
-    // We use a custom modal instead of window.confirm for better UX, but for now we'll keep it simple
     if (window.confirm("Are you sure you want to delete this project? All associated questions will be lost.")) {
       try {
-        if (!id.startsWith('proj_sample_')) {
+        const updatedProjects = projects.filter(p => p.id !== id);
+        setProjects(updatedProjects);
+        localStorage.setItem('local_projects', JSON.stringify(updatedProjects));
+
+        // Also clean up questions associated with this project
+        const savedQs = localStorage.getItem('local_questions');
+        if (savedQs) {
           try {
-            await deleteDoc(doc(db, 'projects', id));
-          } catch (error) {
-            console.warn("Firestore error, deleting from local state only", error);
-          }
+            const allQuestions = JSON.parse(savedQs);
+            delete allQuestions[id];
+            localStorage.setItem('local_questions', JSON.stringify(allQuestions));
+          } catch (e) {}
         }
-        setProjects(projects.filter(p => p.id !== id));
+
         if (selectedProject?.id === id) {
           setSelectedProject(null);
         }
@@ -277,22 +256,24 @@ export default function Projects() {
     if (!selectedProject) return;
 
     try {
-      if (editingQuestion) {
+      const savedQs = localStorage.getItem('local_questions');
+      let allQuestions: Record<string, ProbingQuestion[]> = {};
+      if (savedQs) {
         try {
-          if (!editingQuestion.id.startsWith('q_')) {
-            const questionRef = doc(db, `projects/${selectedProject.id}/probing_questions`, editingQuestion.id);
-            await updateDoc(questionRef, {
-              questionText: questionFormData.questionText,
-              isRequired: questionFormData.isRequired
-            });
-          }
-        } catch (error) {
-          console.warn("Firestore error, updating local state only", error);
-        }
-        
-        const updatedQuestions = questions.map(q => 
+          allQuestions = JSON.parse(savedQs);
+        } catch (e) {}
+      } else {
+        allQuestions = SAMPLE_QUESTIONS;
+      }
+
+      const projQuestions = allQuestions[selectedProject.id] || [];
+
+      if (editingQuestion) {
+        const updatedQuestions = projQuestions.map(q => 
           q.id === editingQuestion.id ? { ...q, ...questionFormData } as ProbingQuestion : q
         );
+        allQuestions[selectedProject.id] = updatedQuestions;
+        localStorage.setItem('local_questions', JSON.stringify(allQuestions));
         setQuestions(updatedQuestions);
       } else {
         const newId = `q_new_${Date.now()}`;
@@ -303,19 +284,10 @@ export default function Projects() {
           isRequired: questionFormData.isRequired || false
         };
         
-        try {
-          if (!selectedProject.id.startsWith('proj_sample_')) {
-            await setDoc(doc(db, `projects/${selectedProject.id}/probing_questions`, newId), {
-              projectId: selectedProject.id,
-              questionText: questionFormData.questionText,
-              isRequired: questionFormData.isRequired
-            });
-          }
-        } catch (error) {
-          console.warn("Firestore error, adding to local state only", error);
-        }
-        
-        setQuestions([...questions, newQuestion]);
+        const updatedQuestions = [...projQuestions, newQuestion];
+        allQuestions[selectedProject.id] = updatedQuestions;
+        localStorage.setItem('local_questions', JSON.stringify(allQuestions));
+        setQuestions(updatedQuestions);
       }
       handleCloseQuestionModal();
     } catch (error) {
@@ -327,14 +299,20 @@ export default function Projects() {
     if (!selectedProject) return;
     if (window.confirm("Are you sure you want to delete this question?")) {
       try {
-        if (!id.startsWith('q_')) {
+        const savedQs = localStorage.getItem('local_questions');
+        let allQuestions: Record<string, ProbingQuestion[]> = {};
+        if (savedQs) {
           try {
-            await deleteDoc(doc(db, `projects/${selectedProject.id}/probing_questions`, id));
-          } catch (error) {
-            console.warn("Firestore error, deleting from local state only", error);
-          }
+            allQuestions = JSON.parse(savedQs);
+          } catch (e) {}
         }
-        setQuestions(questions.filter(q => q.id !== id));
+        
+        const projQuestions = allQuestions[selectedProject.id] || [];
+        const updatedQuestions = projQuestions.filter(q => q.id !== id);
+        
+        allQuestions[selectedProject.id] = updatedQuestions;
+        localStorage.setItem('local_questions', JSON.stringify(allQuestions));
+        setQuestions(updatedQuestions);
       } catch (error) {
         console.error("Error deleting question:", error);
       }

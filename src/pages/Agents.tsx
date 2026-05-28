@@ -1,6 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { collection, getDocs, doc, updateDoc, deleteDoc, setDoc, query, orderBy } from 'firebase/firestore';
-import { db } from '../lib/firebase';
 import { 
   Users as UsersIcon, 
   Search, 
@@ -76,21 +74,20 @@ export default function Agents() {
   const fetchAgents = async () => {
     try {
       setLoading(true);
-      const q = query(collection(db, 'agents'), orderBy('name'));
-      const querySnapshot = await getDocs(q);
-      const agentsData: AgentData[] = [];
-      querySnapshot.forEach((doc) => {
-        agentsData.push({ id: doc.id, ...doc.data() } as AgentData);
-      });
-      
-      if (agentsData.length === 0) {
-        setAgents(SAMPLE_AGENTS);
+      const saved = localStorage.getItem('local_agents');
+      if (saved) {
+        try {
+          setAgents(JSON.parse(saved));
+        } catch (e) {
+          setAgents(SAMPLE_AGENTS);
+        }
       } else {
-        setAgents(agentsData);
+        setAgents(SAMPLE_AGENTS);
+        localStorage.setItem('local_agents', JSON.stringify(SAMPLE_AGENTS));
       }
     } catch (error) {
       console.error("Error fetching agents:", error);
-      setAgents(SAMPLE_AGENTS); // Fallback to sample data on error
+      setAgents(SAMPLE_AGENTS);
     } finally {
       setLoading(false);
     }
@@ -130,24 +127,11 @@ export default function Agents() {
     e.preventDefault();
     try {
       if (editingAgent) {
-        try {
-          if (!editingAgent.id.startsWith('agent_sample_')) {
-            const agentRef = doc(db, 'agents', editingAgent.id);
-            await updateDoc(agentRef, {
-              name: formData.name,
-              email: formData.email,
-              campaign: formData.campaign,
-              status: formData.status
-            });
-          }
-        } catch (error) {
-          console.warn("Firestore error, updating local state only", error);
-        }
-        
         const updatedAgents = agents.map(a => 
           a.id === editingAgent.id ? { ...a, ...formData } as AgentData : a
         );
         setAgents(updatedAgents);
+        localStorage.setItem('local_agents', JSON.stringify(updatedAgents));
       } else {
         const newId = `agent_${Date.now()}`;
         const newAgent = {
@@ -159,19 +143,9 @@ export default function Agents() {
           createdAt: new Date()
         } as AgentData;
         
-        try {
-          await setDoc(doc(db, 'agents', newId), {
-            name: formData.name,
-            email: formData.email,
-            campaign: formData.campaign,
-            status: formData.status,
-            createdAt: new Date()
-          });
-        } catch (error) {
-          console.warn("Firestore error, adding to local state only", error);
-        }
-        
-        setAgents([...agents, newAgent]);
+        const updatedAgents = [...agents, newAgent];
+        setAgents(updatedAgents);
+        localStorage.setItem('local_agents', JSON.stringify(updatedAgents));
       }
       handleCloseModal();
     } catch (error) {
@@ -182,14 +156,9 @@ export default function Agents() {
   const handleDelete = async (id: string) => {
     if (window.confirm("Are you sure you want to delete this agent?")) {
       try {
-        if (!id.startsWith('agent_sample_')) {
-          try {
-            await deleteDoc(doc(db, 'agents', id));
-          } catch (error) {
-            console.warn("Firestore error, deleting from local state only", error);
-          }
-        }
-        setAgents(agents.filter(a => a.id !== id));
+        const updatedAgents = agents.filter(a => a.id !== id);
+        setAgents(updatedAgents);
+        localStorage.setItem('local_agents', JSON.stringify(updatedAgents));
       } catch (error) {
         console.error("Error deleting agent:", error);
       }

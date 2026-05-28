@@ -1,17 +1,3 @@
-import { 
-  collection, 
-  doc, 
-  getDoc, 
-  setDoc, 
-  updateDoc, 
-  deleteDoc, 
-  getDocs, 
-  query, 
-  orderBy, 
-  onSnapshot
-} from 'firebase/firestore';
-import { db, auth } from './firebase';
-
 export enum OperationType {
   CREATE = 'create',
   UPDATE = 'update',
@@ -42,20 +28,17 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
   const errInfo: FirestoreErrorInfo = {
     error: error instanceof Error ? error.message : String(error),
     authInfo: {
-      userId: auth?.currentUser?.uid || null,
-      email: auth?.currentUser?.email || null,
-      emailVerified: auth?.currentUser?.emailVerified || null,
-      isAnonymous: auth?.currentUser?.isAnonymous || null,
-      tenantId: auth?.currentUser?.tenantId || null,
-      providerInfo: auth?.currentUser?.providerData?.map(provider => ({
-        providerId: provider.providerId,
-        email: provider.email,
-       })) || []
+      userId: 'dev-admin',
+      email: 'dev@example.com',
+      emailVerified: true,
+      isAnonymous: false,
+      tenantId: null,
+      providerInfo: []
     },
     operationType,
     path
   };
-  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  console.error('Local Storage Operation Logging: ', JSON.stringify(errInfo));
   throw new Error(JSON.stringify(errInfo));
 }
 
@@ -104,125 +87,107 @@ export interface SettingsData {
   updatedAt?: number;
 }
 
-const SETTINGS_DOC_ID = 'workspace';
-const SETTINGS_COLLECTION = 'settings';
-const CALLS_COLLECTION = 'call_audits';
+// Global set of listeners for call audits database changes
+const auditListeners = new Set<(audits: CallAudit[]) => void>();
 
-// Settings Accessors
-export async function getWorkspaceSettings(): Promise<SettingsData | null> {
-  const path = `${SETTINGS_COLLECTION}/${SETTINGS_DOC_ID}`;
-  
-  const timeoutPromise = new Promise<null>((_, reject) => 
-    setTimeout(() => reject(new Error("Firestore loading timed out")), 3500)
-  );
-
-  try {
-    const docRef = doc(db, SETTINGS_COLLECTION, SETTINGS_DOC_ID);
-    
-    const snap = await Promise.race([
-      getDoc(docRef),
-      timeoutPromise
-    ]) as any;
-
-    if (snap && snap.exists()) {
-      const data = snap.data() as SettingsData;
-      // Backup to localStorage cache
-      localStorage.setItem('auditSettings', JSON.stringify(data));
-      return data;
-    }
-    
-    // Fallback to local storage if document doesn't exist
-    const saved = localStorage.getItem('auditSettings');
-    if (saved) {
-      try {
-        return JSON.parse(saved) as SettingsData;
-      } catch (e) {
-        console.error('Failed to parse cached settings local backup', e);
-      }
-    }
-    return null;
-  } catch (error) {
-    console.warn("Firestore settings load failed or timed out. Falling back to local storage cache.", error);
-    
-    // Fallback to local storage cache on any error/timeout
-    const saved = localStorage.getItem('auditSettings');
-    if (saved) {
-      try {
-        return JSON.parse(saved) as SettingsData;
-      } catch (e) {
-        console.error('Failed to parse cached settings local backup in exception path', e);
-      }
-    }
-    return null;
-  }
-}
-
-export async function saveWorkspaceSettings(settings: SettingsData): Promise<void> {
-  const path = `${SETTINGS_COLLECTION}/${SETTINGS_DOC_ID}`;
-  try {
-    // Sync to local backup instantly
-    localStorage.setItem('auditSettings', JSON.stringify(settings));
-    
-    const docRef = doc(db, SETTINGS_COLLECTION, SETTINGS_DOC_ID);
-    const writePromise = setDoc(docRef, {
-      ...settings,
-      updatedAt: Date.now()
-    }, { merge: true });
-    
-    const timeoutPromise = new Promise<void>((_, reject) => 
-      setTimeout(() => reject(new Error("Firestore save timed out")), 3500)
-    );
-    
-    await Promise.race([writePromise, timeoutPromise]);
-  } catch (error) {
-    console.warn("Firestore save failed or timed out. Settings are backed up in local storage cache.", error);
-  }
-}
-
-// Call Audits Accessors
-export function subscribeToCallAudits(onUpdate: (audits: CallAudit[]) => void, onError?: (error: Error) => void) {
-  const q = query(collection(db, CALLS_COLLECTION), orderBy('timestamp', 'desc'));
-  return onSnapshot(q, (snapshot) => {
-    const audits: CallAudit[] = [];
-    snapshot.forEach((snap) => {
-      audits.push({ id: snap.id, ...snap.data() } as CallAudit);
-    });
-    onUpdate(audits);
-  }, (error) => {
+// Helper to load audits from local storage
+function loadLocalAudits(): CallAudit[] {
+  const saved = localStorage.getItem('callAudits');
+  if (saved) {
     try {
-      handleFirestoreError(error, OperationType.LIST, CALLS_COLLECTION);
-    } catch (err: any) {
-      if (onError) onError(err);
+      return JSON.parse(saved) as CallAudit[];
+    } catch (e) {
+      console.error('Failed to parse cached audits', e);
+    }
+  }
+  return [];
+}
+
+// Helper to save audits to local storage and notify active subscribers
+function saveLocalAudits(audits: CallAudit[]): void {
+  localStorage.setItem('callAudits', JSON.stringify(audits));
+  notifyAuditListeners(audits);
+}
+
+function notifyAuditListeners(audits: CallAudit[]): void {
+  auditListeners.forEach(listener => {
+    try {
+      listener(audits);
+    } catch (e) {
+      console.error("Error invoking subscriber", e);
     }
   });
 }
 
-export async function createCallAuditDoc(audit: CallAudit): Promise<void> {
-  const path = `${CALLS_COLLECTION}/${audit.id}`;
-  try {
-    // Exclude localized temporary audioUrl from Firestore
-    const { audioUrl, ...firestoreData } = audit;
-    await setDoc(doc(db, CALLS_COLLECTION, audit.id), firestoreData);
-  } catch (error) {
-    handleFirestoreError(error, OperationType.CREATE, path);
+// Settings Accessors
+export async function getWorkspaceSettings(): Promise<SettingsData | null> {
+  const saved = localStorage.getItem('auditSettings');
+  if (saved) {
+    try {
+      return JSON.parse(saved) as SettingsData;
+    } catch (e) {
+      console.error('Failed to parse cached settings local backup', e);
+    }
   }
+  return null;
+}
+
+export async function saveWorkspaceSettings(settings: SettingsData): Promise<void> {
+  localStorage.setItem('auditSettings', JSON.stringify({
+    ...settings,
+    updatedAt: Date.now()
+  }));
+}
+
+// Call Audits Accessors (Mocking real-time subscription using LocalStorage event bus and subscribers list)
+export function subscribeToCallAudits(onUpdate: (audits: CallAudit[]) => void, onError?: (error: Error) => void) {
+  auditListeners.add(onUpdate);
+  
+  // Deliver current state immediately
+  onUpdate(loadLocalAudits());
+
+  const handleStorageChange = (e: StorageEvent) => {
+    if (e.key === 'callAudits') {
+      const audits = loadLocalAudits();
+      onUpdate(audits);
+    }
+  };
+  window.addEventListener('storage', handleStorageChange);
+
+  return () => {
+    auditListeners.delete(onUpdate);
+    window.removeEventListener('storage', handleStorageChange);
+  };
+}
+
+export async function createCallAuditDoc(audit: CallAudit): Promise<void> {
+  const audits = loadLocalAudits();
+  const index = audits.findIndex(a => a.id === audit.id);
+  
+  // Exclude localized raw data or temporary audioUrl
+  const { audioUrl, ...persistedAudit } = audit;
+  
+  if (index >= 0) {
+    audits[index] = { ...audits[index], ...persistedAudit } as CallAudit;
+  } else {
+    audits.unshift(persistedAudit as CallAudit);
+  }
+  
+  saveLocalAudits(audits);
 }
 
 export async function updateCallAuditDoc(id: string, updates: Partial<CallAudit>): Promise<void> {
-  const path = `${CALLS_COLLECTION}/${id}`;
-  try {
-    const { audioUrl, ...firestoreUpdates } = updates;
-    await updateDoc(doc(db, CALLS_COLLECTION, id), firestoreUpdates);
-  } catch (error) {
-    handleFirestoreError(error, OperationType.UPDATE, path);
+  const audits = loadLocalAudits();
+  const index = audits.findIndex(a => a.id === id);
+  if (index >= 0) {
+    const { audioUrl, ...persistedUpdates } = updates;
+    audits[index] = { ...audits[index], ...persistedUpdates } as CallAudit;
+    saveLocalAudits(audits);
   }
 }
 
 export async function deleteCallAuditDoc(id: string): Promise<void> {
-  const path = `${CALLS_COLLECTION}/${id}`;
-  try {
-    await deleteDoc(doc(db, CALLS_COLLECTION, id));
-  } catch (error) {
-    handleFirestoreError(error, OperationType.DELETE, path);
-  }
+  const audits = loadLocalAudits();
+  const filtered = audits.filter(a => a.id !== id);
+  saveLocalAudits(filtered);
 }

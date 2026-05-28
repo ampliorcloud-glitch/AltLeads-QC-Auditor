@@ -1,7 +1,4 @@
 import React from 'react';
-import { signInWithPopup } from 'firebase/auth';
-import { auth, googleProvider, db } from '../lib/firebase';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { useAuthStore } from '../store/authStore';
 import { LogIn, ShieldCheck } from 'lucide-react';
 
@@ -13,35 +10,15 @@ export default function Login() {
     try {
       setError('');
       setLoading(true);
-      const result = await signInWithPopup(auth, googleProvider);
-      const user = result.user;
-
-      // Check if user exists in the "users" collection in the "alqc" database
-      const userRef = doc(db, 'users', user.uid);
-      const userSnap = await getDoc(userRef);
-
-      if (userSnap.exists()) {
-        const userData = userSnap.data();
-        setUserRole(userData.role);
-      } else {
-        // If it's the first time, create a default Viewer or Admin role
-        // For development, we'll make the first user an Admin
-        const isFirstUser = true; // In a real app, you'd check if any users exist
-        const role = isFirstUser ? 'Admin' : 'Viewer';
-        
-        await setDoc(userRef, {
-          user_id: user.uid,
-          full_name: user.displayName || 'Unknown User',
-          email: user.email,
-          role: role,
-          status: 'Active',
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        });
-        setUserRole(role);
-      }
-
-      setUser(user);
+      // Clean mock local user bypassing remote auth completely
+      const mockUser = {
+        uid: 'dev-admin',
+        email: 'dev@example.com',
+        displayName: 'Dev Admin'
+      };
+      
+      setUser(mockUser as any);
+      setUserRole('Admin');
     } catch (err: any) {
       console.error('Login error:', err);
       setError(err.message || 'Failed to sign in. Please try again.');
@@ -89,7 +66,7 @@ export default function Login() {
               </div>
               <div className="relative flex justify-center text-xs font-bold font-display uppercase tracking-widest">
                 <span className="px-4 bg-white text-[#9CA3AF]">
-                  Secure Access via Firebase
+                  Local Sandbox Access Protocol
                 </span>
               </div>
             </div>

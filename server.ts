@@ -34,40 +34,8 @@ async function startServer() {
         }
       }
 
-      // 2. Fall back to shared Firestore settings document if NO server environment key is defined
-      if (!apiKey) {
-        try {
-          const configPath = path.join(process.cwd(), "firebase-applet-config.json");
-          if (fs.existsSync(configPath)) {
-            const firebaseConfig = JSON.parse(fs.readFileSync(configPath, "utf8"));
-            const { initializeApp: serverInitApp } = await import("firebase/app");
-            const { getFirestore: serverGetFirestore, doc: serverDoc, getDoc: serverGetDoc } = await import("firebase/firestore");
-            
-            const appInstance = serverInitApp(firebaseConfig);
-            const firestoredb = serverGetFirestore(appInstance, firebaseConfig.firestoreDatabaseId);
-            
-            const timeoutPromise = new Promise<null>((_, reject) => 
-              setTimeout(() => reject(new Error("Firestore lookup timed out")), 2000)
-            );
-            
-            const getDocWithTimeout = async () => {
-              return await serverGetDoc(serverDoc(firestoredb, "settings", "workspace"));
-            };
-            
-            const settingsSnap = await Promise.race([getDocWithTimeout(), timeoutPromise]) as any;
-            
-            if (settingsSnap && settingsSnap.exists()) {
-              const settingsData = settingsSnap.data();
-              if (settingsData && settingsData.geminiApiKey && settingsData.geminiApiKey.trim()) {
-                apiKey = settingsData.geminiApiKey.trim();
-                console.log("No server environment key found. Falling back to the custom Gemini API Key stored in workspace Firestore document.");
-              }
-            }
-          }
-        } catch (dbError) {
-          console.warn("Could not query settings workspace document for custom API key fallback.", dbError);
-        }
-      }
+      // 2. Local fallback on client settings is handled by client forwarding the key in req.body.apiKey
+      // No server-side remote Firestore lookup needed.
 
       if (!apiKey) {
         console.error("No valid Gemini API key found (neither custom Settings key nor server environment variable).");

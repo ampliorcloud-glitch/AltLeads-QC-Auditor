@@ -1,6 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { collection, getDocs, doc, updateDoc, deleteDoc, setDoc, query, orderBy } from 'firebase/firestore';
-import { db } from '../lib/firebase';
 import { useAuthStore } from '../store/authStore';
 import { 
   ShieldCheck, 
@@ -81,17 +79,16 @@ export default function Users() {
   const fetchUsers = async () => {
     try {
       setLoading(true);
-      const q = query(collection(db, 'users'), orderBy('displayName'));
-      const querySnapshot = await getDocs(q);
-      const usersData: UserData[] = [];
-      querySnapshot.forEach((doc) => {
-        usersData.push({ uid: doc.id, ...doc.data() } as UserData);
-      });
-      
-      if (usersData.length === 0) {
-        setUsers(SAMPLE_USERS);
+      const saved = localStorage.getItem('local_users');
+      if (saved) {
+        try {
+          setUsers(JSON.parse(saved));
+        } catch (e) {
+          setUsers(SAMPLE_USERS);
+        }
       } else {
-        setUsers(usersData);
+        setUsers(SAMPLE_USERS);
+        localStorage.setItem('local_users', JSON.stringify(SAMPLE_USERS));
       }
     } catch (error) {
       console.error("Error fetching users:", error);
@@ -135,24 +132,11 @@ export default function Users() {
     e.preventDefault();
     try {
       if (editingUser) {
-        // Update existing user
-        try {
-          if (!editingUser.uid.startsWith('user_sample_')) {
-            const userRef = doc(db, 'users', editingUser.uid);
-            await updateDoc(userRef, {
-              role: formData.role,
-              status: formData.status,
-              displayName: formData.displayName
-            });
-          }
-        } catch (error) {
-          console.warn("Firestore error, updating local state only", error);
-        }
-        
         const updatedUsers = users.map(u => 
           u.uid === editingUser.uid ? { ...u, ...formData } as UserData : u
         );
         setUsers(updatedUsers);
+        localStorage.setItem('local_users', JSON.stringify(updatedUsers));
       } else {
         const newUid = `user_${Date.now()}`;
         const newUser = {
@@ -164,19 +148,9 @@ export default function Users() {
           createdAt: new Date()
         } as UserData;
         
-        try {
-          await setDoc(doc(db, 'users', newUid), {
-            email: formData.email,
-            displayName: formData.displayName,
-            role: formData.role,
-            status: formData.status,
-            createdAt: new Date()
-          });
-        } catch (error) {
-          console.warn("Firestore error, adding to local state only", error);
-        }
-        
-        setUsers([...users, newUser]);
+        const updatedUsers = [...users, newUser];
+        setUsers(updatedUsers);
+        localStorage.setItem('local_users', JSON.stringify(updatedUsers));
       }
       handleCloseModal();
     } catch (error) {
@@ -187,14 +161,9 @@ export default function Users() {
   const handleDelete = async (uid: string) => {
     if (window.confirm("Are you sure you want to delete this user? This action cannot be undone.")) {
       try {
-        if (!uid.startsWith('user_sample_')) {
-          try {
-            await deleteDoc(doc(db, 'users', uid));
-          } catch (error) {
-            console.warn("Firestore error, deleting from local state only", error);
-          }
-        }
-        setUsers(users.filter(u => u.uid !== uid));
+        const updatedUsers = users.filter(u => u.uid !== uid);
+        setUsers(updatedUsers);
+        localStorage.setItem('local_users', JSON.stringify(updatedUsers));
       } catch (error) {
         console.error("Error deleting user:", error);
       }
